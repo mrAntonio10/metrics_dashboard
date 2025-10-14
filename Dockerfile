@@ -5,16 +5,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=9002
 
-# Copia los artefactos de build standalone
-# Estructura esperada:
-#   .next/standalone  (contiene server.js y app)
-#   .next/static
-#   public            (si existe)
-COPY .next/standalone ./         # copia server.js y el bundle standalone
+# Copia artefactos ya construidos
+COPY .next/standalone ./         # server.js + bundle
 COPY .next/static ./.next/static # assets
-COPY public ./public             # opcional
+# (no copies public si no existe)
+# COPY public ./public
 
 EXPOSE 9002
-
-# server.js es el entrypoint generado por Next en modo 'standalone'
 CMD ["node","server.js"]
