@@ -9,7 +9,12 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission';
 
-// —— Tipos alineados al JSON de /var/lib/vivace-metrics/metrics.json ——
+// ⬇️ Recharts
+import {
+  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+} from 'recharts';
+
+// —— Tipos alineados al JSON —— //
 type Container = {
   id: string;
   name: string;
@@ -34,6 +39,16 @@ type Container = {
   };
 };
 
+type ClientAgg = {
+  client: string;
+  containers: number;
+  cpu_percent_sum: number;
+  mem_used_bytes_sum: number;
+  mem_limit_bytes_sum: number;
+  net_rx_bytes_sum: number;
+  net_tx_bytes_sum: number;
+};
+
 type MetricsPayload = {
   timestamp: string;
   host: string;
@@ -45,18 +60,10 @@ type MetricsPayload = {
   };
   containers: Container[];
   clients: string[];
-  client_agg: Array<{
-    client: string;
-    containers: number;
-    cpu_percent_sum: number;
-    mem_used_bytes_sum: number;
-    mem_limit_bytes_sum: number;
-    net_rx_bytes_sum: number;
-    net_tx_bytes_sum: number;
-  }>;
+  client_agg: ClientAgg[];
 };
 
-// —— helpers de formato ——
+// —— helpers —— //
 const fmtNum = (n: number) =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(n);
 
@@ -73,51 +80,126 @@ const percent = (num: number, den: number) => {
   return `${fmtNum((num / den) * 100)}%`;
 };
 
+// ————————————————————————————————————————————————
+
 export default function UsagePage() {
+  const [client, setClient] = useState('all');
+  const [date, setDate] = useState<'live' | string>('live'); // 'live' o YYYY-MM-DD
+
   const [data, setData] = useState<MetricsPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [client, setClient] = useState('all');
 
-  // fetch + polling cada 10s
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historySeries, setHistorySeries] = useState<Array<{ date: string; cpu: number; ram: number }>>([]);
+
+  // Cargar lista de fechas disponibles para snapshots
+  useEffect(() => {
+    const loadDates = async () => {
+      try {
+        const res = await fetch('/api/usage/dates', { cache: 'no-store' });
+        if (!res.ok) return;
+        const j = await res.json();
+        const dates: string[] = (j?.dates ?? []).sort(); // ascendente YYYY-MM-DD
+        setAvailableDates(dates);
+      } catch (_) {
+        // opcional: ignorar
+      }
+    };
+    loadDates();
+  }, []);
+
+  // Live vs Snapshot fetch
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
-        const res = await fetch('/api/usage', { cache: 'no-store' });
+        const url = date === 'live' ? '/api/usage' : `/api/usage?date=${date}`;
+        const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as MetricsPayload;
         if (alive) { setData(json); setError(null); }
       } catch (e: any) {
-        if (alive) setError(e.message ?? 'fetch_failed');
+        if (alive) setError(e?.message ?? 'fetch_failed');
       }
     };
-    load();
-    const id = setInterval(load, 10_000);
-    return () => { alive = false; clearInterval(id); };
-  }, []);
 
-  // opciones de cliente (dinámicas)
+    load();
+    // Solo hacemos polling en “live”
+    let id: any;
+    if (date === 'live') id = setInterval(load, 10_000);
+    return () => { alive = false; if (id) clearInterval(id); };
+  }, [date]);
+
+  // Opciones de cliente
   const clients = useMemo(() => ['all', ...(data?.clients ?? [])], [data]);
 
-  // agregados visibles
+  // Agregados visibles
   const selectedAgg = useMemo(() => {
     if (!data) return [];
     return client === 'all' ? data.client_agg : data.client_agg.filter(a => a.client === client);
   }, [data, client]);
 
-  // contenedores visibles
+  // Contenedores visibles
   const visibleContainers = useMemo<Container[]>(() => {
     if (!data) return [];
     return client === 'all' ? data.containers : data.containers.filter(c => c.client === client);
   }, [data, client]);
 
+  // —— Construir serie histórica para el gráfico (CPU% y RAM%) —— //
+  useEffect(() => {
+    // Si no hay fechas históricas o no hay nada que mostrar, vaciamos
+    if (availableDates.length === 0) { setHistorySeries([]); return; }
+
+    // Traemos, por defecto, las últimas 14 fechas para el gráfico
+    const lastDates = availableDates.slice(-14);
+
+    let cancel = false;
+    const loadHistory = async () => {
+      setHistoryLoading(true);
+      try {
+        const results = await Promise.all(
+          lastDates.map(async (d) => {
+            const r = await fetch(`/api/usage?date=${d}`, { cache: 'no-store' });
+            if (!r.ok) return null;
+            const j = (await r.json()) as MetricsPayload;
+            return { date: d, payload: j };
+          })
+        );
+
+        if (cancel) return;
+
+        // Calcula CPU% y RAM% agregados del cliente (o “all” = sumatoria global)
+        const series = results
+          .filter((x): x is { date: string; payload: MetricsPayload } => !!x)
+          .map(({ date, payload }) => {
+            const aggs = client === 'all'
+              ? payload.client_agg
+              : payload.client_agg.filter(a => a.client === client);
+
+            const cpu = aggs.reduce((acc, a) => acc + (a.cpu_percent_sum || 0), 0);
+            const memUsed = aggs.reduce((acc, a) => acc + (a.mem_used_bytes_sum || 0), 0);
+            const memLimit = aggs.reduce((acc, a) => acc + (a.mem_limit_bytes_sum || 0), 0);
+            const ramPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
+
+            return { date, cpu: Number(cpu.toFixed(2)), ram: Number(ramPct.toFixed(2)) };
+          });
+
+        setHistorySeries(series);
+      } finally {
+        if (!cancel) setHistoryLoading(false);
+      }
+    };
+
+    loadHistory();
+    return () => { cancel = true; };
+  }, [availableDates, client]);
+
   return (
     <ProtectedComponent permissionKey="page:usage" fallback={<AccessDeniedFallback />}>
-      <PageHeader
-        title="Usage Administration"
-        description="Métricas reales de Docker por cliente y contenedor."
-      >
+      <PageHeader title="Usage Administration" description="Métricas reales de Docker por cliente, con histórico diario.">
         <div className="flex flex-wrap items-center gap-2">
+          {/* Cliente */}
           <Select value={client} onValueChange={setClient}>
             <SelectTrigger className="w-[220px]">
               <SelectValue placeholder="Filter by Client..." />
@@ -127,6 +209,19 @@ export default function UsagePage() {
                 <SelectItem key={c} value={c}>
                   {c === 'all' ? 'All Clients' : c}
                 </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Fecha */}
+          <Select value={date} onValueChange={(v) => setDate(v as any)}>
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="Select date..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem key="live" value="live">Live (ahora)</SelectItem>
+              {availableDates.slice().reverse().map(d => (
+                <SelectItem key={d} value={d}>{d}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -149,6 +244,34 @@ export default function UsagePage() {
       </PageHeader>
 
       <div className="space-y-6">
+        {/* DASHBOARD: líneas CPU% y RAM% (histórico diario) */}
+        {historySeries.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                {client === 'all' ? 'All Clients' : client} – CPU% y RAM% (últimos snapshots)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="h-[320px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={historySeries}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis yAxisId="left" domain={[0, 'auto']} tickFormatter={(v) => `${v}%`} />
+                  <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip formatter={(v: any) => `${v}%`} />
+                  <Legend />
+                  {/* CPU% */}
+                  <Line type="monotone" dataKey="cpu" name="CPU %" yAxisId="left" dot={false} strokeWidth={2} />
+                  {/* RAM% */}
+                  <Line type="monotone" dataKey="ram" name="RAM %" yAxisId="right" dot={false} strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+              {historyLoading && <div className="text-xs text-muted-foreground mt-2">Cargando histórico…</div>}
+            </CardContent>
+          </Card>
+        )}
+
         {/* AGREGADOS POR CLIENTE */}
         <Card>
           <CardHeader><CardTitle>Client aggregates</CardTitle></CardHeader>
