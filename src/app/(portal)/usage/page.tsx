@@ -17,6 +17,13 @@ import {
 /* =========================
  * Tipos (compatibles con snapshots viejos)
  * ========================= */
+
+type PortBinding = {
+  container: string;      // ej: "80/tcp"
+  host_ip: string | null; // ej: "0.0.0.0" | "::" | null (no publicado)
+  host_port: string | null; // ej: "8085" | null (no publicado)
+};
+
 type DockerNetwork = {
   IPAddress?: string;
   DNSNames?: string[] | null;
@@ -29,6 +36,7 @@ type Container = {
   image: string;       // puede venir ""
   status: string;      // puede venir ""
   ports_list: string;  // puede venir ""
+  ports?: PortBinding[];
   client: string;
   role: string;
   tls: { exposes_443: boolean };
@@ -87,42 +95,55 @@ const labelHasAny = (labels: Record<string, string> | undefined, prefixes: strin
 };
 
 // Devuelve un string legible de puertos
+// Devuelve un string legible de puertos priorizando el JSON estructurado
 const pickPorts = (c: Container) => {
+  // 1) Si hay estructura nueva, úsala
+  if (c.ports && Array.isArray(c.ports) && c.ports.length > 0) {
+    // Publicados: host_ip:host_port->container
+    const published = c.ports
+      .filter(p => p.host_port) // solo los que realmente publican
+      .map(p => `${p.host_ip ?? '*'}:${p.host_port} -> ${p.container}`);
+
+    // Expuestos (no publicados): solo container
+    const exposedOnly = c.ports
+      .filter(p => !p.host_port)
+      .map(p => p.container);
+
+    // Si hay publicados, muéstralos primero y luego (entre paréntesis) los no publicados
+    if (published.length > 0 && exposedOnly.length > 0) {
+      return `${published.join(', ')} (exposed: ${exposedOnly.join(', ')})`;
+    }
+    if (published.length > 0) return published.join(', ');
+    if (exposedOnly.length > 0) return exposedOnly.join(', ');
+  }
+
+  // 2) Si no hay estructura, usa el texto crudo de docker ps
   const raw = (c.ports_list ?? '').trim();
   if (raw) return raw;
 
-  // Heurísticas por role / labels
+  // 3) Fallbacks heurísticos (compat con snapshots muy viejos)
   if (c.role === 'webserver') {
     const base = ['80/tcp'];
     if (c.tls?.exposes_443) base.push('443/tcp');
-    // Si hay labels tipo traefik*, asumimos 443
     if (labelHasAny(c.labels, ['traefik.http.routers.', 'traefik.tcp.routers.']) && !base.includes('443/tcp')) {
       base.push('443/tcp');
     }
     return base.join(', ');
   }
-
-  if (c.role === 'app') {
-    // Ajusta si tu app usa 3000/8080/8000/etc.
-    return '8000/tcp';
-  }
-
+  if (c.role === 'app') return '8000/tcp';
   if (c.role === 'queue') {
-    // Si es RabbitMQ mostrar 5672/15672; si es Celery worker, probablemente sin puertos.
-    if (labelHasAny(c.labels, ['com.docker.compose.service']) && (c.labels!['com.docker.compose.service'] || '').includes('rabbit')) {
+    if ((c.labels?.['com.docker.compose.service'] ?? '').includes('rabbit')) {
       return '5672/tcp, 15672/tcp';
     }
     return '—';
   }
-
-  // Redis/DB suelen estar sin puertos publicados; puedes afinar por nombre de servicio
   const svc = (c.labels?.['com.docker.compose.service'] ?? '').toLowerCase();
   if (svc.includes('redis')) return '6379/tcp';
   if (svc.includes('postgres')) return '5432/tcp';
   if (svc.includes('mysql') || svc.includes('mariadb')) return '3306/tcp';
-
   return '—';
 };
+
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number.isFinite(n) ? n : 0);
