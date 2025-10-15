@@ -9,23 +9,33 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission';
 
-// ⬇️ Recharts
+// Recharts
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts';
 
-// —— Tipos alineados al JSON —— //
+/* =========================
+ * Tipos (compatibles con snapshots viejos)
+ * ========================= */
+type DockerNetwork = {
+  IPAddress?: string;
+  DNSNames?: string[] | null;
+  Aliases?: string[] | null;
+};
+
 type Container = {
   id: string;
-  name: string;
-  image: string;
-  status: string;
-  ports_list: string;
+  name: string;        // puede venir ""
+  image: string;       // puede venir ""
+  status: string;      // puede venir ""
+  ports_list: string;  // puede venir ""
   client: string;
   role: string;
   tls: { exposes_443: boolean };
   started_at: string;
   uptime_seconds: number | null;
+  labels?: Record<string, string>;
+  networks?: Record<string, DockerNetwork>;
   stats: {
     cpu_percent: number;
     mem_used_bytes: number;
@@ -63,15 +73,17 @@ type MetricsPayload = {
   client_agg: ClientAgg[];
 };
 
-// —— helpers —— //
+/* =========================
+ * Helpers de formato
+ * ========================= */
 const fmtNum = (n: number) =>
-  new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(n);
+  new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number.isFinite(n) ? n : 0);
 
 const fmtBytes = (bytes: number) => {
-  if (!bytes || bytes < 0) return '0 B';
+  const b = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const val = bytes / Math.pow(1024, i);
+  const i = Math.min(Math.floor(Math.log(b || 1) / Math.log(1024)), units.length - 1);
+  const val = b / Math.pow(1024, i);
   return `${fmtNum(val)} ${units[i]}`;
 };
 
@@ -80,82 +92,126 @@ const percent = (num: number, den: number) => {
   return `${fmtNum((num / den) * 100)}%`;
 };
 
-// ————————————————————————————————————————————————
+const coalesce = (...vals: (string | undefined | null)[]) =>
+  vals.find(v => !!v && v.trim().length > 0)?.trim() ?? '';
 
+const fmtDuration = (sec?: number | null) => {
+  if (sec == null || sec < 0) return '';
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+};
+
+/* =========================
+ * Fallbacks de snapshot
+ * ========================= */
+const pickName = (c: Container) => {
+  const fromLabel = c.labels?.['com.docker.compose.service'];
+  const fromNetworks = Object.values(c.networks ?? {})
+    .flatMap(n => [...(n.DNSNames ?? []), ...(n.Aliases ?? [])])
+    .find(Boolean);
+  const fromRole = (c.role && c.client && c.role !== 'unknown') ? `vivace-${c.role}-${c.client}` : '';
+  return coalesce(c.name, fromLabel, fromNetworks, fromRole, c.id?.slice(0, 12));
+};
+
+const pickImage = (c: Container) => coalesce(c.image) || '(unknown)';
+
+const pickStatus = (c: Container) => {
+  const s = coalesce(c.status);
+  if (s) return s;
+  const up = fmtDuration(c.uptime_seconds);
+  return up ? `Up ${up}` : '—';
+};
+
+/* =========================
+ * Componente
+ * ========================= */
 export default function UsagePage() {
   const [client, setClient] = useState('all');
-  const [date, setDate] = useState<'live' | string>('live'); // 'live' o YYYY-MM-DD
+  const [date, setDate] = useState<'live' | string>('live');
 
   const [data, setData] = useState<MetricsPayload | null>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [availableDates, setAvailableDates] = useState<string[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historySeries, setHistorySeries] = useState<Array<{ date: string; cpu: number; ram: number }>>([]);
 
-  // Cargar lista de fechas disponibles para snapshots
+  /* ---- Fechas disponibles (snapshots) ---- */
   useEffect(() => {
-    const loadDates = async () => {
+    let alive = true;
+    (async () => {
       try {
         const res = await fetch('/api/usage/dates', { cache: 'no-store' });
         if (!res.ok) return;
         const j = await res.json();
-        const dates: string[] = (j?.dates ?? []).sort(); // ascendente YYYY-MM-DD
-        setAvailableDates(dates);
-      } catch (_) {
-        // opcional: ignorar
-      }
-    };
-    loadDates();
+        const dates: string[] = (j?.dates ?? []).filter(Boolean).sort();
+        if (alive) setAvailableDates(dates);
+      } catch { /* noop */ }
+    })();
+    return () => { alive = false; };
   }, []);
 
-  // Live vs Snapshot fetch
+  /* ---- Cargar métricas (live / snapshot) ---- */
   useEffect(() => {
     let alive = true;
     const load = async () => {
       try {
+        setLoading(true);
         const url = date === 'live' ? '/api/usage' : `/api/usage?date=${date}`;
         const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as MetricsPayload;
         if (alive) { setData(json); setError(null); }
       } catch (e: any) {
-        if (alive) setError(e?.message ?? 'fetch_failed');
+        if (alive) { setError(e?.message ?? 'fetch_failed'); setData(null); }
+      } finally {
+        if (alive) setLoading(false);
       }
     };
 
     load();
-    // Solo hacemos polling en “live”
+    // polling solo en live
     let id: any;
     if (date === 'live') id = setInterval(load, 10_000);
     return () => { alive = false; if (id) clearInterval(id); };
   }, [date]);
 
-  // Opciones de cliente
+  /* ---- Opciones de cliente ---- */
   const clients = useMemo(() => ['all', ...(data?.clients ?? [])], [data]);
 
-  // Agregados visibles
+  /* ---- Agregados visibles ---- */
   const selectedAgg = useMemo(() => {
     if (!data) return [];
     return client === 'all' ? data.client_agg : data.client_agg.filter(a => a.client === client);
   }, [data, client]);
 
-  // Contenedores visibles
+  /* ---- Contenedores visibles ---- */
   const visibleContainers = useMemo<Container[]>(() => {
     if (!data) return [];
-    return client === 'all' ? data.containers : data.containers.filter(c => c.client === client);
+    const list = client === 'all' ? data.containers : data.containers.filter(c => c.client === client);
+    // Orden estable: por client → role → pickName
+    return list.slice().sort((a, b) => {
+      const ca = a.client.localeCompare(b.client);
+      if (ca !== 0) return ca;
+      const ra = a.role.localeCompare(b.role);
+      if (ra !== 0) return ra;
+      return pickName(a).localeCompare(pickName(b));
+    });
   }, [data, client]);
 
-  // —— Construir serie histórica para el gráfico (CPU% y RAM%) —— //
+  /* ---- Histórico (CPU% y RAM%) ---- */
   useEffect(() => {
-    // Si no hay fechas históricas o no hay nada que mostrar, vaciamos
     if (availableDates.length === 0) { setHistorySeries([]); return; }
 
-    // Traemos, por defecto, las últimas 14 fechas para el gráfico
     const lastDates = availableDates.slice(-14);
-
     let cancel = false;
-    const loadHistory = async () => {
+
+    (async () => {
       setHistoryLoading(true);
       try {
         const results = await Promise.all(
@@ -169,7 +225,6 @@ export default function UsagePage() {
 
         if (cancel) return;
 
-        // Calcula CPU% y RAM% agregados del cliente (o “all” = sumatoria global)
         const series = results
           .filter((x): x is { date: string; payload: MetricsPayload } => !!x)
           .map(({ date, payload }) => {
@@ -189,12 +244,14 @@ export default function UsagePage() {
       } finally {
         if (!cancel) setHistoryLoading(false);
       }
-    };
+    })();
 
-    loadHistory();
     return () => { cancel = true; };
   }, [availableDates, client]);
 
+  /* =========================
+   * Render
+   * ========================= */
   return (
     <ProtectedComponent permissionKey="page:usage" fallback={<AccessDeniedFallback />}>
       <PageHeader title="Usage Administration" description="Métricas reales de Docker por cliente, con histórico diario.">
@@ -239,12 +296,13 @@ export default function UsagePage() {
             </span>
           )}
 
+          {loading && <span className="text-xs text-muted-foreground">Loading…</span>}
           {error && <span className="text-xs text-destructive">Error: {error}</span>}
         </div>
       </PageHeader>
 
       <div className="space-y-6">
-        {/* DASHBOARD: líneas CPU% y RAM% (histórico diario) */}
+        {/* Gráfico histórico */}
         {historySeries.length > 0 && (
           <Card>
             <CardHeader>
@@ -261,9 +319,7 @@ export default function UsagePage() {
                   <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tickFormatter={(v) => `${v}%`} />
                   <Tooltip formatter={(v: any) => `${v}%`} />
                   <Legend />
-                  {/* CPU% */}
                   <Line type="monotone" dataKey="cpu" name="CPU %" yAxisId="left" dot={false} strokeWidth={2} />
-                  {/* RAM% */}
                   <Line type="monotone" dataKey="ram" name="RAM %" yAxisId="right" dot={false} strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>
@@ -272,7 +328,7 @@ export default function UsagePage() {
           </Card>
         )}
 
-        {/* AGREGADOS POR CLIENTE */}
+        {/* Agregados por cliente */}
         <Card>
           <CardHeader><CardTitle>Client aggregates</CardTitle></CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -313,7 +369,7 @@ export default function UsagePage() {
           </CardContent>
         </Card>
 
-        {/* TABLA DE CONTENEDORES */}
+        {/* Tabla de contenedores */}
         <Card>
           <CardHeader><CardTitle>Containers</CardTitle></CardHeader>
           <CardContent>
@@ -323,7 +379,7 @@ export default function UsagePage() {
                   <TableHead>Container</TableHead>
                   <TableHead>Client</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead className="text-right">CPU% </TableHead>
+                  <TableHead className="text-right">CPU%</TableHead>
                   <TableHead className="text-right">RAM</TableHead>
                   <TableHead className="text-right">Net RX / TX</TableHead>
                   <TableHead className="text-right">PIDs</TableHead>
@@ -335,11 +391,12 @@ export default function UsagePage() {
                 {visibleContainers.map(c => {
                   const ram = `${fmtBytes(c.stats.mem_used_bytes)} / ${fmtBytes(c.stats.mem_limit_bytes)} (${fmtNum(c.stats.mem_percent)}%)`;
                   const net = `${fmtBytes(c.stats.net_rx_bytes)} / ${fmtBytes(c.stats.net_tx_bytes)}`;
+                  const ports = coalesce(c.ports_list) || '—';
                   return (
                     <TableRow key={c.id}>
                       <TableCell className="font-mono text-xs">
-                        {c.name}
-                        <div className="text-[10px] text-muted-foreground">{c.image}</div>
+                        {pickName(c)}
+                        <div className="text-[10px] text-muted-foreground">{pickImage(c)}</div>
                       </TableCell>
                       <TableCell><Badge variant="outline">{c.client}</Badge></TableCell>
                       <TableCell>{c.role}</TableCell>
@@ -347,9 +404,9 @@ export default function UsagePage() {
                       <TableCell className="text-right">{ram}</TableCell>
                       <TableCell className="text-right">{net}</TableCell>
                       <TableCell className="text-right">{c.stats.pids}</TableCell>
-                      <TableCell className="max-w-[220px] truncate" title={c.ports_list}>{c.ports_list || '—'}</TableCell>
+                      <TableCell className="max-w-[220px] truncate" title={ports}>{ports}</TableCell>
                       <TableCell>
-                        <span className="text-xs">{c.status}</span>
+                        <span className="text-xs">{pickStatus(c)}</span>
                         {c.tls.exposes_443 && <Badge className="ml-2" variant="outline">TLS/443</Badge>}
                       </TableCell>
                     </TableRow>
@@ -370,3 +427,4 @@ export default function UsagePage() {
     </ProtectedComponent>
   );
 }
+
