@@ -1,17 +1,15 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
-  // 💡 clave para Docker runner-only:
   output: 'standalone',
 
-  // (opcional) durante el build estás ignorando errores
-  // considera desactivar esto en producción si quieres builds estrictos
-  typescript: {
-    ignoreBuildErrors: true,
+  // 👇 clave para que mysql2 funcione en Server Components
+  experimental: {
+    serverComponentsExternalPackages: ['mysql2'],
   },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
+
+  typescript: { ignoreBuildErrors: true },
+  eslint: { ignoreDuringBuilds: true },
 
   images: {
     remotePatterns: [

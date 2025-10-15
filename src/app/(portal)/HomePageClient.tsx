@@ -1,3 +1,4 @@
+// src/app/(portal)/HomePageClient.tsx
 'use client'
 
 import { useMemo, useTransition } from 'react'
@@ -14,7 +15,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 export type Org = { id: string; name: string }
-export type CountRow = { tenantId: string; tenantName: string; users: number; clients: number; admins: number }
+export type CountRow = { tenantId: string; tenantName: string; users: number; clients: number; admins: number; error?: string }
 
 export default function HomePageClient({
   orgs,
@@ -50,11 +51,8 @@ export default function HomePageClient({
   const totalClients = filtered.reduce((a, b) => a + b.clients, 0)
   const totalAdmins = filtered.reduce((a, b) => a + b.admins, 0)
 
-  const barData = filtered.map((row) => ({
-    name: row.tenantName,
-    Users: row.users,
-    Clients: row.clients,
-  }))
+  const barData = filtered.map((row) => ({ name: row.tenantName, Users: row.users, Clients: row.clients }))
+  const errored = filtered.filter((r) => r.error)
 
   return (
     <ProtectedComponent permissionKey="page:home" fallback={<AccessDeniedFallback />}>
@@ -63,17 +61,13 @@ export default function HomePageClient({
           <Select onValueChange={handleSelectClient} value={selectedClient === 'all' ? undefined : selectedClient}>
             <SelectTrigger className="w-[220px]">
               <SelectValue
-                placeholder={
-                  selectedClient === 'all' ? 'All Clients' : orgs.find((o) => o.id === selectedClient)?.name || 'All Clients'
-                }
+                placeholder={selectedClient === 'all' ? 'All Clients' : orgs.find((o) => o.id === selectedClient)?.name || 'All Clients'}
               />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Clients</SelectItem>
               {orgs.map((org) => (
-                <SelectItem key={org.id} value={org.id}>
-                  {org.name}
-                </SelectItem>
+                <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -82,40 +76,26 @@ export default function HomePageClient({
         </div>
       </PageHeader>
 
+      {errored.length > 0 && (
+        <Alert className="bg-red-50 border-red-200">
+          <AlertTriangle className="h-4 w-4 text-red-500" />
+          <AlertTitle className="text-red-700 font-bold">Tenants con error</AlertTitle>
+          <AlertDescription className="text-red-700">
+            {errored.map((e) => (
+              <div key={e.tenantId}>
+                <strong>{e.tenantName}:</strong> {e.error}
+              </div>
+            ))}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="space-y-6">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <KpiCard
-            title="Total Users"
-            value={String(totalUsers)}
-            change={0}
-            changePeriod="now"
-            icon={<Users className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Suma de usuarios por ambiente (consulta directa a BD)."
-          />
-          <KpiCard
-            title="Total Clients"
-            value={String(totalClients)}
-            change={0}
-            changePeriod="now"
-            icon={<CreditCard className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Suma de clientes por ambiente (consulta directa a BD)."
-          />
-          <KpiCard
-            title="Total Admins"
-            value={String(totalAdmins)}
-            change={0}
-            changePeriod="now"
-            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Usuarios con rol admin o is_admin=1."
-          />
-          <KpiCard
-            title="Environments"
-            value={String(filtered.length)}
-            change={0}
-            changePeriod="now"
-            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Cantidad de ambientes filtrados."
-          />
+          <KpiCard title="Total Users" value={String(totalUsers)} change={0} changePeriod="now" icon={<Users className="h-4 w-4 text-muted-foreground" />} tooltip="Suma de usuarios por ambiente (consulta directa a BD)." />
+          <KpiCard title="Total Clients" value={String(totalClients)} change={0} changePeriod="now" icon={<CreditCard className="h-4 w-4 text-muted-foreground" />} tooltip="Suma de clientes por ambiente (consulta directa a BD)." />
+          <KpiCard title="Total Admins" value={String(totalAdmins)} change={0} changePeriod="now" icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />} tooltip="Usuarios con rol admin o is_admin=1." />
+          <KpiCard title="Environments" value={String(filtered.length)} change={0} changePeriod="now" icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />} tooltip="Cantidad de ambientes filtrados." />
         </div>
 
         <Alert className="bg-primary/10 border-primary/20">
@@ -128,9 +108,7 @@ export default function HomePageClient({
 
         <div className="grid gap-4 lg:grid-cols-1">
           <Card>
-            <CardHeader>
-              <CardTitle>Comparación por Ambiente (Usuarios vs Clientes)</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Comparación por Ambiente (Usuarios vs Clientes)</CardTitle></CardHeader>
             <CardContent>
               <ChartContainer config={{}} className="h-64">
                 <BarChart data={barData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
@@ -149,4 +127,3 @@ export default function HomePageClient({
     </ProtectedComponent>
   )
 }
-
