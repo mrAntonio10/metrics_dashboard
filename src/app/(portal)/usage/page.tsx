@@ -76,6 +76,54 @@ type MetricsPayload = {
 /* =========================
  * Helpers de formato
  * ========================= */
+
+const has = (obj: Record<string, any> | undefined, key: string) =>
+  !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+
+const labelHasAny = (labels: Record<string, string> | undefined, prefixes: string[]) => {
+  if (!labels) return false;
+  const keys = Object.keys(labels);
+  return keys.some(k => prefixes.some(p => k.startsWith(p)));
+};
+
+// Devuelve un string legible de puertos
+const pickPorts = (c: Container) => {
+  const raw = (c.ports_list ?? '').trim();
+  if (raw) return raw;
+
+  // Heurísticas por role / labels
+  if (c.role === 'webserver') {
+    const base = ['80/tcp'];
+    if (c.tls?.exposes_443) base.push('443/tcp');
+    // Si hay labels tipo traefik*, asumimos 443
+    if (labelHasAny(c.labels, ['traefik.http.routers.', 'traefik.tcp.routers.']) && !base.includes('443/tcp')) {
+      base.push('443/tcp');
+    }
+    return base.join(', ');
+  }
+
+  if (c.role === 'app') {
+    // Ajusta si tu app usa 3000/8080/8000/etc.
+    return '8000/tcp';
+  }
+
+  if (c.role === 'queue') {
+    // Si es RabbitMQ mostrar 5672/15672; si es Celery worker, probablemente sin puertos.
+    if (labelHasAny(c.labels, ['com.docker.compose.service']) && (c.labels!['com.docker.compose.service'] || '').includes('rabbit')) {
+      return '5672/tcp, 15672/tcp';
+    }
+    return '—';
+  }
+
+  // Redis/DB suelen estar sin puertos publicados; puedes afinar por nombre de servicio
+  const svc = (c.labels?.['com.docker.compose.service'] ?? '').toLowerCase();
+  if (svc.includes('redis')) return '6379/tcp';
+  if (svc.includes('postgres')) return '5432/tcp';
+  if (svc.includes('mysql') || svc.includes('mariadb')) return '3306/tcp';
+
+  return '—';
+};
+
 const fmtNum = (n: number) =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number.isFinite(n) ? n : 0);
 
@@ -404,7 +452,9 @@ export default function UsagePage() {
                       <TableCell className="text-right">{ram}</TableCell>
                       <TableCell className="text-right">{net}</TableCell>
                       <TableCell className="text-right">{c.stats.pids}</TableCell>
-                      <TableCell className="max-w-[220px] truncate" title={ports}>{ports}</TableCell>
+                      <TableCell className="max-w-[220px] truncate" title={pickPorts(c)}>
+                        {pickPorts(c)}
+                      </TableCell>
                       <TableCell>
                         <span className="text-xs">{pickStatus(c)}</span>
                         {c.tls.exposes_443 && <Badge className="ml-2" variant="outline">TLS/443</Badge>}
