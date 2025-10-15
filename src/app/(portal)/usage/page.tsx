@@ -93,54 +93,15 @@ const labelHasAny = (labels: Record<string, string> | undefined, prefixes: strin
 
 // String legible de puertos (prioriza JSON estructurado)
 const pickPorts = (c: Container) => {
-  // 1) Estructura nueva
   if (Array.isArray(c.ports) && c.ports.length > 0) {
-    const published: string[] = [];
-    const exposedOnly: string[] = [];
-
-    for (const p of c.ports) {
-      if (p.host_port) {
-        // normaliza host_ip (por si viene null)
-        const hip = (p.host_ip && p.host_ip.trim().length > 0) ? p.host_ip : '*';
-        published.push(`${hip}:${p.host_port} -> ${p.container}`);
-      } else {
-        exposedOnly.push(p.container);
-      }
-    }
-
-    // dedupe manteniendo orden
-    const dedupe = (arr: string[]) => Array.from(new Set(arr));
-    const pub = dedupe(published);
-    const exp = dedupe(exposedOnly);
-
-    if (pub.length && exp.length) return `${pub.join(', ')} (exposed: ${exp.join(', ')})`;
-    if (pub.length) return pub.join(', ');
-    if (exp.length) return exp.join(', ');
+    const published = [...new Set(c.ports.filter(p => p.host_port).map(p => `${p.host_ip ?? '*'}:${p.host_port} -> ${p.container}`))];
+    const exposed   = [...new Set(c.ports.filter(p => !p.host_port).map(p => p.container))];
+    if (published.length && exposed.length) return `${published.join(', ')} (exposed: ${exposed.join(', ')})`;
+    if (published.length) return published.join(', ');
+    if (exposed.length) return exposed.join(', ');
   }
-
-  // 2) Texto crudo (docker ps)
   const raw = (c.ports_list ?? '').trim();
-  if (raw) return raw;
-
-  // 3) Heurísticas de compat
-  if (c.role === 'webserver') {
-    const base = ['80/tcp'];
-    if (c.tls?.exposes_443) base.push('443/tcp');
-    if (labelHasAny(c.labels, ['traefik.http.routers.', 'traefik.tcp.routers.']) && !base.includes('443/tcp')) {
-      base.push('443/tcp');
-    }
-    return base.join(', ');
-  }
-  if (c.role === 'app') return '8000/tcp';
-  if (c.role === 'queue') {
-    if ((c.labels?.['com.docker.compose.service'] ?? '').includes('rabbit')) return '5672/tcp, 15672/tcp';
-    return '—';
-  }
-  const svc = (c.labels?.['com.docker.compose.service'] ?? '').toLowerCase();
-  if (svc.includes('redis')) return '6379/tcp';
-  if (svc.includes('postgres')) return '5432/tcp';
-  if (svc.includes('mysql') || svc.includes('mariadb')) return '3306/tcp';
-  return '—';
+  return raw || '—';
 };
 
 const fmtNum = (n: number) =>
