@@ -15,12 +15,12 @@ import {
 } from 'recharts';
 
 /* =========================
- * Tipos (compatibles con snapshots viejos)
+ * Tipos
  * ========================= */
 
 type PortBinding = {
-  container: string;      // ej: "80/tcp"
-  host_ip: string | null; // ej: "0.0.0.0" | "::" | null (no publicado)
+  container: string;        // ej: "80/tcp"
+  host_ip: string | null;   // ej: "0.0.0.0" | "::" | null (no publicado)
   host_port: string | null; // ej: "8085" | null (no publicado)
 };
 
@@ -32,11 +32,11 @@ type DockerNetwork = {
 
 type Container = {
   id: string;
-  name: string;        // puede venir ""
-  image: string;       // puede venir ""
-  status: string;      // puede venir ""
-  ports_list: string;  // puede venir ""
-  ports?: PortBinding[];
+  name: string;
+  image: string;
+  status: string;
+  ports_list: string;         // texto de docker ps (puede venir vacío)
+  ports?: PortBinding[];      // estructura nueva
   client: string;
   role: string;
   tls: { exposes_443: boolean };
@@ -85,43 +85,44 @@ type MetricsPayload = {
  * Helpers de formato
  * ========================= */
 
-const has = (obj: Record<string, any> | undefined, key: string) =>
-  !!obj && Object.prototype.hasOwnProperty.call(obj, key);
-
 const labelHasAny = (labels: Record<string, string> | undefined, prefixes: string[]) => {
   if (!labels) return false;
   const keys = Object.keys(labels);
   return keys.some(k => prefixes.some(p => k.startsWith(p)));
 };
 
-// Devuelve un string legible de puertos
-// Devuelve un string legible de puertos priorizando el JSON estructurado
+// String legible de puertos (prioriza JSON estructurado)
 const pickPorts = (c: Container) => {
-  // 1) Si hay estructura nueva, úsala
-  if (c.ports && Array.isArray(c.ports) && c.ports.length > 0) {
-    // Publicados: host_ip:host_port->container
-    const published = c.ports
-      .filter(p => p.host_port) // solo los que realmente publican
-      .map(p => `${p.host_ip ?? '*'}:${p.host_port} -> ${p.container}`);
+  // 1) Estructura nueva
+  if (Array.isArray(c.ports) && c.ports.length > 0) {
+    const published: string[] = [];
+    const exposedOnly: string[] = [];
 
-    // Expuestos (no publicados): solo container
-    const exposedOnly = c.ports
-      .filter(p => !p.host_port)
-      .map(p => p.container);
-
-    // Si hay publicados, muéstralos primero y luego (entre paréntesis) los no publicados
-    if (published.length > 0 && exposedOnly.length > 0) {
-      return `${published.join(', ')} (exposed: ${exposedOnly.join(', ')})`;
+    for (const p of c.ports) {
+      if (p.host_port) {
+        // normaliza host_ip (por si viene null)
+        const hip = (p.host_ip && p.host_ip.trim().length > 0) ? p.host_ip : '*';
+        published.push(`${hip}:${p.host_port} -> ${p.container}`);
+      } else {
+        exposedOnly.push(p.container);
+      }
     }
-    if (published.length > 0) return published.join(', ');
-    if (exposedOnly.length > 0) return exposedOnly.join(', ');
+
+    // dedupe manteniendo orden
+    const dedupe = (arr: string[]) => Array.from(new Set(arr));
+    const pub = dedupe(published);
+    const exp = dedupe(exposedOnly);
+
+    if (pub.length && exp.length) return `${pub.join(', ')} (exposed: ${exp.join(', ')})`;
+    if (pub.length) return pub.join(', ');
+    if (exp.length) return exp.join(', ');
   }
 
-  // 2) Si no hay estructura, usa el texto crudo de docker ps
+  // 2) Texto crudo (docker ps)
   const raw = (c.ports_list ?? '').trim();
   if (raw) return raw;
 
-  // 3) Fallbacks heurísticos (compat con snapshots muy viejos)
+  // 3) Heurísticas de compat
   if (c.role === 'webserver') {
     const base = ['80/tcp'];
     if (c.tls?.exposes_443) base.push('443/tcp');
@@ -132,9 +133,7 @@ const pickPorts = (c: Container) => {
   }
   if (c.role === 'app') return '8000/tcp';
   if (c.role === 'queue') {
-    if ((c.labels?.['com.docker.compose.service'] ?? '').includes('rabbit')) {
-      return '5672/tcp, 15672/tcp';
-    }
+    if ((c.labels?.['com.docker.compose.service'] ?? '').includes('rabbit')) return '5672/tcp, 15672/tcp';
     return '—';
   }
   const svc = (c.labels?.['com.docker.compose.service'] ?? '').toLowerCase();
@@ -143,7 +142,6 @@ const pickPorts = (c: Container) => {
   if (svc.includes('mysql') || svc.includes('mariadb')) return '3306/tcp';
   return '—';
 };
-
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Number.isFinite(n) ? n : 0);
@@ -210,7 +208,7 @@ export default function UsagePage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historySeries, setHistorySeries] = useState<Array<{ date: string; cpu: number; ram: number }>>([]);
 
-  /* ---- Fechas disponibles (snapshots) ---- */
+  // Fechas disponibles
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -225,7 +223,7 @@ export default function UsagePage() {
     return () => { alive = false; };
   }, []);
 
-  /* ---- Cargar métricas (live / snapshot) ---- */
+  // Carga de métricas (live/snapshot)
   useEffect(() => {
     let alive = true;
     const load = async () => {
@@ -242,28 +240,22 @@ export default function UsagePage() {
         if (alive) setLoading(false);
       }
     };
-
     load();
-    // polling solo en live
     let id: any;
     if (date === 'live') id = setInterval(load, 10_000);
     return () => { alive = false; if (id) clearInterval(id); };
   }, [date]);
 
-  /* ---- Opciones de cliente ---- */
   const clients = useMemo(() => ['all', ...(data?.clients ?? [])], [data]);
 
-  /* ---- Agregados visibles ---- */
   const selectedAgg = useMemo(() => {
     if (!data) return [];
     return client === 'all' ? data.client_agg : data.client_agg.filter(a => a.client === client);
   }, [data, client]);
 
-  /* ---- Contenedores visibles ---- */
   const visibleContainers = useMemo<Container[]>(() => {
     if (!data) return [];
     const list = client === 'all' ? data.containers : data.containers.filter(c => c.client === client);
-    // Orden estable: por client → role → pickName
     return list.slice().sort((a, b) => {
       const ca = a.client.localeCompare(b.client);
       if (ca !== 0) return ca;
@@ -273,13 +265,11 @@ export default function UsagePage() {
     });
   }, [data, client]);
 
-  /* ---- Histórico (CPU% y RAM%) ---- */
+  // Histórico (CPU% y RAM%)
   useEffect(() => {
     if (availableDates.length === 0) { setHistorySeries([]); return; }
-
     const lastDates = availableDates.slice(-14);
     let cancel = false;
-
     (async () => {
       setHistoryLoading(true);
       try {
@@ -291,41 +281,31 @@ export default function UsagePage() {
             return { date: d, payload: j };
           })
         );
-
         if (cancel) return;
-
         const series = results
           .filter((x): x is { date: string; payload: MetricsPayload } => !!x)
           .map(({ date, payload }) => {
             const aggs = client === 'all'
               ? payload.client_agg
               : payload.client_agg.filter(a => a.client === client);
-
             const cpu = aggs.reduce((acc, a) => acc + (a.cpu_percent_sum || 0), 0);
             const memUsed = aggs.reduce((acc, a) => acc + (a.mem_used_bytes_sum || 0), 0);
             const memLimit = aggs.reduce((acc, a) => acc + (a.mem_limit_bytes_sum || 0), 0);
             const ramPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
-
             return { date, cpu: Number(cpu.toFixed(2)), ram: Number(ramPct.toFixed(2)) };
           });
-
         setHistorySeries(series);
       } finally {
         if (!cancel) setHistoryLoading(false);
       }
     })();
-
     return () => { cancel = true; };
   }, [availableDates, client]);
 
-  /* =========================
-   * Render
-   * ========================= */
   return (
     <ProtectedComponent permissionKey="page:usage" fallback={<AccessDeniedFallback />}>
       <PageHeader title="Usage Administration" description="Métricas reales de Docker por cliente, con histórico diario.">
         <div className="flex flex-wrap items-center gap-2">
-          {/* Cliente */}
           <Select value={client} onValueChange={setClient}>
             <SelectTrigger className="w-[220px]">
               <SelectValue placeholder="Filter by Client..." />
@@ -339,7 +319,6 @@ export default function UsagePage() {
             </SelectContent>
           </Select>
 
-          {/* Fecha */}
           <Select value={date} onValueChange={(v) => setDate(v as any)}>
             <SelectTrigger className="w-[220px]">
               <SelectValue placeholder="Select date..." />
@@ -371,7 +350,6 @@ export default function UsagePage() {
       </PageHeader>
 
       <div className="space-y-6">
-        {/* Gráfico histórico */}
         {historySeries.length > 0 && (
           <Card>
             <CardHeader>
@@ -397,7 +375,6 @@ export default function UsagePage() {
           </Card>
         )}
 
-        {/* Agregados por cliente */}
         <Card>
           <CardHeader><CardTitle>Client aggregates</CardTitle></CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -438,7 +415,6 @@ export default function UsagePage() {
           </CardContent>
         </Card>
 
-        {/* Tabla de contenedores */}
         <Card>
           <CardHeader><CardTitle>Containers</CardTitle></CardHeader>
           <CardContent>
@@ -460,7 +436,6 @@ export default function UsagePage() {
                 {visibleContainers.map(c => {
                   const ram = `${fmtBytes(c.stats.mem_used_bytes)} / ${fmtBytes(c.stats.mem_limit_bytes)} (${fmtNum(c.stats.mem_percent)}%)`;
                   const net = `${fmtBytes(c.stats.net_rx_bytes)} / ${fmtBytes(c.stats.net_tx_bytes)}`;
-                  const ports = coalesce(c.ports_list) || '—';
                   return (
                     <TableRow key={c.id}>
                       <TableCell className="font-mono text-xs">
@@ -473,7 +448,7 @@ export default function UsagePage() {
                       <TableCell className="text-right">{ram}</TableCell>
                       <TableCell className="text-right">{net}</TableCell>
                       <TableCell className="text-right">{c.stats.pids}</TableCell>
-                      <TableCell className="max-w-[220px] truncate" title={pickPorts(c)}>
+                      <TableCell className="max-w-[320px] truncate" title={pickPorts(c)}>
                         {pickPorts(c)}
                       </TableCell>
                       <TableCell>
@@ -498,4 +473,3 @@ export default function UsagePage() {
     </ProtectedComponent>
   );
 }
-
