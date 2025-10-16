@@ -2,7 +2,7 @@
 import fs from 'fs/promises'
 import path from 'path'
 import mysql from 'mysql2/promise'
-import HomePageClient from './HomePageClient' // <-- usa tu componente cliente
+import HomePageClient from './HomePageClient'
 
 export const dynamic = 'force-dynamic' // evita pre-render estático
 
@@ -12,19 +12,21 @@ type TenantConfig = {
   envPath: string
   db: { host: string; port: number; database: string; user: string; password: string }
   tables: { users: string; clients: string }
+  management: { status: string; date: string }
 }
 
 export type TenantCounts = {
   tenantId: string
   tenantName: string
-  users: number          // ← será clients + admins + providers
+  users: number
   clients: number
-  admins: number         // providers.type = 'admin'
-  providers: number      // providers.type = 'provider'
+  admins: number
+  providers: number
+  management?: { status: string; date: string } // ✅ añadimos este campo
   error?: string
 }
 
-const TENANTS_DIR = '/root/mr/vivace-api/' // ruta ABSOLUTA dentro del contenedor
+const TENANTS_DIR = '/root/mr/vivace-api/' // ruta dentro del contenedor
 
 function parseDotEnv(content: string): Record<string, string> {
   const out: Record<string, string> = {}
@@ -69,6 +71,9 @@ async function loadTenants(): Promise<TenantConfig[]> {
       const user = env.DB_USERNAME
       const password = env.DB_PASSWORD
 
+      const managementStatus = env.MANAGEMENT_STATUS || ''
+      const managementDate = env.MANAGEMENT_DATE || ''
+
       if (!host || !database || !user) continue
 
       tenants.push({
@@ -79,6 +84,10 @@ async function loadTenants(): Promise<TenantConfig[]> {
         tables: {
           users: env.USERS_TABLE || 'users',
           clients: env.CLIENTS_TABLE || 'clients',
+        },
+        management: {
+          status: managementStatus,
+          date: managementDate,
         },
       })
     } catch (e) {
@@ -95,35 +104,34 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
     database: tenant.db.database,
     user: tenant.db.user,
     password: tenant.db.password,
-  } as const;
+  } as const
 
-  let conn: mysql.Connection | null = null;
+  let conn: mysql.Connection | null = null
   try {
-    conn = await mysql.createConnection(base);
+    conn = await mysql.createConnection(base)
 
-    // ✅ Conteo de clientes
-    const [cRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${tenant.tables.clients}\``);
-    const clients = Number((cRows as any)[0]?.c || 0);
+    // Conteo de clientes
+    const [cRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${tenant.tables.clients}\``)
+    const clients = Number((cRows as any)[0]?.c || 0)
 
-    // ✅ Conteo por tipo en providers (admin vs provider)
-    let admins = 0;
-    let providers = 0;
+    // Conteo de providers por tipo
+    let admins = 0
+    let providers = 0
     try {
       const [typeRows] = await conn.query(`
         SELECT type, COUNT(*) AS c
         FROM providers
         GROUP BY type
-      `);
-      const map = new Map<string, number>();
-      (typeRows as any[]).forEach(r => map.set(String(r.type), Number(r.c)));
-      admins = map.get('admin') || 0;
-      providers = map.get('provider') || 0;
+      `)
+      const map = new Map<string, number>()
+      ;(typeRows as any[]).forEach((r) => map.set(String(r.type), Number(r.c)))
+      admins = map.get('admin') || 0
+      providers = map.get('provider') || 0
     } catch (err: any) {
-      console.warn('providers table missing or incompatible in', tenant.id, err.code);
+      console.warn('providers table missing or incompatible in', tenant.id, err.code)
     }
 
-    // ✅ "users" = suma de las 3 categorías solicitadas
-    const users = clients + admins + providers;
+    const users = clients + admins + providers
 
     return {
       tenantId: tenant.id,
@@ -132,9 +140,10 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
       clients,
       admins,
       providers,
-    };
+      management: tenant.management, // ✅ Pasamos el management
+    }
   } catch (e: any) {
-    console.error('DB error', tenant.id, e?.code || e?.message || e);
+    console.error('DB error', tenant.id, e?.code || e?.message || e)
     return {
       tenantId: tenant.id,
       tenantName: tenant.name,
@@ -142,18 +151,22 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
       clients: 0,
       admins: 0,
       providers: 0,
+      management: tenant.management,
       error: e?.code || e?.message,
-    };
+    }
   } finally {
-    try { await conn?.end(); } catch { }
+    try {
+      await conn?.end()
+    } catch {}
   }
 }
-
 
 export default async function Page({ searchParams }: { searchParams?: { client?: string } }) {
   const tenants = await loadTenants()
   const counts = await Promise.all(tenants.map((t) => getTenantCounts(t)))
+
   const orgs = tenants.map((t) => ({ id: t.id, name: t.name }))
   const selectedClient = (searchParams?.client || 'all').toLowerCase()
+
   return <HomePageClient orgs={orgs} counts={counts} selectedClient={selectedClient} />
 }

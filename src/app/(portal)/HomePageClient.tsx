@@ -22,6 +22,7 @@ export type CountRow = {
   clients: number
   admins: number
   providers: number
+  management?: { status: string; date: string }
   error?: string
 }
 
@@ -70,6 +71,15 @@ export default function HomePageClient({
 
   const errored = filtered.filter((r) => r.error)
 
+  async function handleStatusChange(tenantId: string, newStatus: string) {
+    await fetch('/api/tenants/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantId, status: newStatus }),
+    })
+    router.refresh()
+  }
+
   return (
     <ProtectedComponent permissionKey="page:home" fallback={<AccessDeniedFallback />}>
       <PageHeader title="Executive Summary" description="De-identified ops metrics (direct DB).">
@@ -117,8 +127,6 @@ export default function HomePageClient({
           <KpiCard
             title="Total Users"
             value={String(totalUsers)}
-            change={0}
-            changePeriod="now"
             icon={<Users className="h-4 w-4 text-muted-foreground" />}
             tooltip="Suma de usuarios por ambiente (consulta directa a BD)."
           />
@@ -148,16 +156,66 @@ export default function HomePageClient({
           />
         </div>
 
-        {/* ⛔️ Eliminado: banner "Direct DB Mode" */}
-        {/* 
-        <Alert className="bg-primary/10 border-primary/20">
-          <AlertTriangle className="h-4 w-4 !text-primary/80" />
-          <AlertTitle className="text-primary/90 font-bold">Direct DB Mode</AlertTitle>
-          <AlertDescription className="text-primary/80">
-            Los datos se cargan server-side leyendo .env.&#123;cliente&#125; y consultando MySQL/RDS sin APIs externas.
-          </AlertDescription>
-        </Alert>
-        */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-4">
+          {filtered.map((t) => {
+            const status = t.management?.status || ''
+            const date = t.management?.date ? new Date(t.management.date) : null
+            const diffDays = date ? Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24)) : 0
+            const expired = status === 'TRIAL' && diffDays > 30
+
+            let nextLabel = ''
+            let nextStatus = ''
+            if (!status) {
+              nextLabel = 'Start Trial'
+              nextStatus = 'TRIAL'
+            } else if (status === 'TRIAL' && expired) {
+              nextLabel = 'Activate Subscription'
+              nextStatus = 'SUBSCRIBED'
+            } else if (status === 'SUBSCRIBED') {
+              nextLabel = 'Renew'
+              nextStatus = 'SUBSCRIBED'
+            }
+
+            const color =
+              !status
+                ? 'bg-yellow-50 border-yellow-200 text-yellow-700'
+                : expired
+                  ? 'bg-red-50 border-red-200 text-red-700'
+                  : status === 'TRIAL'
+                    ? 'bg-blue-50 border-blue-200 text-blue-700'
+                    : 'bg-green-50 border-green-200 text-green-700'
+
+            const statusText =
+              !status
+                ? '🆕 NEW CLIENT'
+                : expired
+                  ? '⚠️ TRIAL EXPIRED'
+                  : status === 'TRIAL'
+                    ? `⏳ TRIAL (${30 - diffDays} days left)`
+                    : '✅ SUBSCRIBED'
+
+            return (
+              <Card key={t.tenantId} className={`${color}`}>
+                <CardHeader>
+                  <CardTitle>{t.tenantName}</CardTitle>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-2">
+                  <div className="text-sm font-semibold">{statusText}</div>
+                  {date && <div className="text-xs text-muted-foreground">Since: {date.toLocaleDateString()}</div>}
+                  {nextLabel && (
+                    <button
+                      onClick={() => handleStatusChange(t.tenantId, nextStatus)}
+                      className="text-sm px-3 py-1 rounded-md bg-primary text-white w-fit hover:opacity-90"
+                    >
+                      {nextLabel}
+                    </button>
+                  )}
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+
 
         <div className="grid gap-4 lg:grid-cols-1">
           <Card>
