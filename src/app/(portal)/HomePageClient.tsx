@@ -4,7 +4,7 @@
 import { useMemo, useTransition } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { PageHeader } from '@/components/page-header'
-import { TimeRangeFilter } from '@/components/time-range-filter'
+// ⛔️ Eliminado: import { TimeRangeFilter } from '@/components/time-range-filter'
 import { KpiCard } from '@/components/kpi-card'
 import { CreditCard, Users, AlertTriangle } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -18,20 +18,28 @@ export type Org = { id: string; name: string }
 export type CountRow = {
   tenantId: string
   tenantName: string
-  users: number      // ahora viene pre-sumado (clients + admins + providers)
+  users: number
   clients: number
   admins: number
   providers: number
   error?: string
 }
-export default function HomePageClient({ orgs, counts, selectedClient }: { orgs: Org[]; counts: CountRow[]; selectedClient: string }) {
 
+export default function HomePageClient({
+  orgs,
+  counts,
+  selectedClient,
+}: {
+  orgs: Org[]
+  counts: CountRow[]
+  selectedClient: string
+}) {
   const router = useRouter()
   const pathname = usePathname()
   const search = useSearchParams()
   const [isPending, startTransition] = useTransition()
 
-  const timeRange = '30d' as const
+  // ⛔️ Eliminado: const timeRange = '30d' as const
 
   const handleSelectClient = (val: string) => {
     startTransition(() => {
@@ -47,16 +55,15 @@ export default function HomePageClient({ orgs, counts, selectedClient }: { orgs:
     [counts, selectedClient],
   )
 
-  // ✅ Total Users = suma de clients + admins + providers
-  const totalUsers = filtered.reduce((acc, r) => acc + r.clients + r.admins + r.providers, 0)
+  const totalUsers = filtered.reduce((a, b) => a + b.users, 0)
   const totalClients = filtered.reduce((a, b) => a + b.clients, 0)
   const totalAdmins = filtered.reduce((a, b) => a + b.admins, 0)
   const totalProviders = filtered.reduce((a, b) => a + b.providers, 0)
 
   const barData = filtered.map((row) => ({
     name: row.tenantName,
+    Users: row.users,
     Clients: row.clients,
-    Admins: row.admins,
     Providers: row.providers,
   }))
   const errored = filtered.filter((r) => r.error)
@@ -68,18 +75,24 @@ export default function HomePageClient({ orgs, counts, selectedClient }: { orgs:
           <Select onValueChange={handleSelectClient} value={selectedClient === 'all' ? undefined : selectedClient}>
             <SelectTrigger className="w-[220px]">
               <SelectValue
-                placeholder={selectedClient === 'all' ? 'All Clients' : orgs.find((o) => o.id === selectedClient)?.name || 'All Clients'}
+                placeholder={
+                  selectedClient === 'all'
+                    ? 'All Clients'
+                    : orgs.find((o) => o.id === selectedClient)?.name || 'All Clients'
+                }
               />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Clients</SelectItem>
               {orgs.map((org) => (
-                <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                <SelectItem key={org.id} value={org.id}>
+                  {org.name}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <TimeRangeFilter value={timeRange} onChange={() => { }} />
+          {/* ⛔️ Eliminado: <TimeRangeFilter value={timeRange} onChange={() => {}} /> */}
         </div>
       </PageHeader>
 
@@ -105,7 +118,7 @@ export default function HomePageClient({ orgs, counts, selectedClient }: { orgs:
             change={0}
             changePeriod="now"
             icon={<Users className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Suma de Clients + Admins + Providers (type) por ambientes filtrados."
+            tooltip="Suma de usuarios por ambiente (consulta directa a BD)."
           />
           <KpiCard
             title="Total Clients"
@@ -113,7 +126,7 @@ export default function HomePageClient({ orgs, counts, selectedClient }: { orgs:
             change={0}
             changePeriod="now"
             icon={<CreditCard className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Cantidad total en tabla clients (ambientes filtrados)."
+            tooltip="Suma de clientes por ambiente (consulta directa a BD)."
           />
           <KpiCard
             title="Total Admins"
@@ -121,7 +134,7 @@ export default function HomePageClient({ orgs, counts, selectedClient }: { orgs:
             change={0}
             changePeriod="now"
             icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-            tooltip="providers.type = 'admin' (ambientes filtrados)."
+            tooltip="Usuarios con type='admin' en providers."
           />
           <KpiCard
             title="Total Providers"
@@ -129,19 +142,12 @@ export default function HomePageClient({ orgs, counts, selectedClient }: { orgs:
             change={0}
             changePeriod="now"
             icon={<Users className="h-4 w-4 text-muted-foreground" />}
-            tooltip="providers.type = 'provider' (ambientes filtrados)."
-          />
-          <KpiCard
-            title="Environments"
-            value={String(filtered.length)}
-            change={0}
-            changePeriod="now"
-            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Cantidad de ambientes filtrados."
+            tooltip="Usuarios con type='provider' en providers."
           />
         </div>
 
-
+        {/* ⛔️ Eliminado: banner "Direct DB Mode" */}
+        {/* 
         <Alert className="bg-primary/10 border-primary/20">
           <AlertTriangle className="h-4 w-4 !text-primary/80" />
           <AlertTitle className="text-primary/90 font-bold">Direct DB Mode</AlertTitle>
@@ -149,10 +155,13 @@ export default function HomePageClient({ orgs, counts, selectedClient }: { orgs:
             Los datos se cargan server-side leyendo .env.&#123;cliente&#125; y consultando MySQL/RDS sin APIs externas.
           </AlertDescription>
         </Alert>
+        */}
 
         <div className="grid gap-4 lg:grid-cols-1">
           <Card>
-            <CardHeader><CardTitle>Comparación por Ambiente (Clients vs Admins vs Providers)</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle>Comparación por Ambiente (Usuarios vs Clientes vs Providers)</CardTitle>
+            </CardHeader>
             <CardContent>
               <ChartContainer config={{}} className="h-64">
                 <BarChart data={barData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
@@ -160,9 +169,8 @@ export default function HomePageClient({ orgs, counts, selectedClient }: { orgs:
                   <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
                   <YAxis allowDecimals={false} />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  {/* ✅ sin serie "Users" */}
+                  <Bar dataKey="Users" radius={4} fill="var(--color-chart-1)" />
                   <Bar dataKey="Clients" radius={4} fill="var(--color-chart-2)" />
-                  <Bar dataKey="Admins" radius={4} fill="var(--color-chart-4)" />
                   <Bar dataKey="Providers" radius={4} fill="var(--color-chart-3)" />
                 </BarChart>
               </ChartContainer>
