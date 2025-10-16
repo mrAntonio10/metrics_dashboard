@@ -95,7 +95,7 @@ const labelHasAny = (labels: Record<string, string> | undefined, prefixes: strin
 const pickPorts = (c: Container) => {
   if (Array.isArray(c.ports) && c.ports.length > 0) {
     const published = [...new Set(c.ports.filter(p => p.host_port).map(p => `${p.host_ip ?? '*'}:${p.host_port} -> ${p.container}`))];
-    const exposed   = [...new Set(c.ports.filter(p => !p.host_port).map(p => p.container))];
+    const exposed = [...new Set(c.ports.filter(p => !p.host_port).map(p => p.container))];
     if (published.length && exposed.length) return `${published.join(', ')} (exposed: ${exposed.join(', ')})`;
     if (published.length) return published.join(', ');
     if (exposed.length) return exposed.join(', ');
@@ -301,10 +301,10 @@ export default function UsagePage() {
 
           {data && (
             <span className="text-xs text-muted-foreground">
-              Updated: {new Date(data.timestamp).toLocaleString()}
+              Updated: {data.timestamp}
             </span>
           )}
-
+          
           {loading && <span className="text-xs text-muted-foreground">Loading…</span>}
           {error && <span className="text-xs text-destructive">Error: {error}</span>}
         </div>
