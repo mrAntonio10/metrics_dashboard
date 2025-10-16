@@ -15,8 +15,15 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 export type Org = { id: string; name: string }
-export type CountRow = { tenantId: string; tenantName: string; users: number; clients: number; admins: number; error?: string }
-
+export type CountRow = {
+  tenantId: string
+  tenantName: string
+  users: number
+  clients: number
+  admins: number
+  providers: number
+  error?: string
+}
 export default function HomePageClient({
   orgs,
   counts,
@@ -50,8 +57,14 @@ export default function HomePageClient({
   const totalUsers = filtered.reduce((a, b) => a + b.users, 0)
   const totalClients = filtered.reduce((a, b) => a + b.clients, 0)
   const totalAdmins = filtered.reduce((a, b) => a + b.admins, 0)
+  const totalProviders = filtered.reduce((a, b) => a + b.providers, 0)
 
-  const barData = filtered.map((row) => ({ name: row.tenantName, Users: row.users, Clients: row.clients }))
+  const barData = filtered.map((row) => ({
+    name: row.tenantName,
+    Users: row.users,
+    Clients: row.clients,
+    Providers: row.providers,
+  }))
   const errored = filtered.filter((r) => r.error)
 
   return (
@@ -72,7 +85,7 @@ export default function HomePageClient({
             </SelectContent>
           </Select>
 
-          <TimeRangeFilter value={timeRange} onChange={() => {}} />
+          <TimeRangeFilter value={timeRange} onChange={() => { }} />
         </div>
       </PageHeader>
 
@@ -95,6 +108,14 @@ export default function HomePageClient({
           <KpiCard title="Total Users" value={String(totalUsers)} change={0} changePeriod="now" icon={<Users className="h-4 w-4 text-muted-foreground" />} tooltip="Suma de usuarios por ambiente (consulta directa a BD)." />
           <KpiCard title="Total Clients" value={String(totalClients)} change={0} changePeriod="now" icon={<CreditCard className="h-4 w-4 text-muted-foreground" />} tooltip="Suma de clientes por ambiente (consulta directa a BD)." />
           <KpiCard title="Total Admins" value={String(totalAdmins)} change={0} changePeriod="now" icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />} tooltip="Usuarios con rol admin o is_admin=1." />
+          <KpiCard
+            title="Total Providers"
+            value={String(totalProviders)}
+            change={0}
+            changePeriod="now"
+            icon={<Users className="h-4 w-4 text-muted-foreground" />}
+            tooltip="Usuarios con type='provider' en la tabla providers."
+          />
           <KpiCard title="Environments" value={String(filtered.length)} change={0} changePeriod="now" icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />} tooltip="Cantidad de ambientes filtrados." />
         </div>
 
@@ -117,6 +138,7 @@ export default function HomePageClient({
                   <YAxis allowDecimals={false} />
                   <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="Users" radius={4} fill="var(--color-chart-1)" />
+                  <Bar dataKey="Providers" radius={4} fill="var(--color-chart-3)" />
                   <Bar dataKey="Clients" radius={4} fill="var(--color-chart-2)" />
                 </BarChart>
               </ChartContainer>

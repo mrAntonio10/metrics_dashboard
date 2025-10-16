@@ -20,6 +20,7 @@ export type TenantCounts = {
   users: number
   clients: number
   admins: number
+  providers: number
   error?: string
 }
 
@@ -94,35 +95,64 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
     database: tenant.db.database,
     user: tenant.db.user,
     password: tenant.db.password,
-  } as const
+  } as const;
 
-  let conn: mysql.Connection | null = null
+  let conn: mysql.Connection | null = null;
   try {
-    conn = await mysql.createConnection(base)
-    const [uRows] = await conn.query('SELECT COUNT(*) AS c FROM `' + tenant.tables.users + '`')
-    const [cRows] = await conn.query('SELECT COUNT(*) AS c FROM `' + tenant.tables.clients + '`')
-    const [aRows] = await conn.query(
-      'SELECT COUNT(*) AS c FROM `' + tenant.tables.users + '` WHERE (role = "admin" OR is_admin = 1)',
-    )
+    conn = await mysql.createConnection(base);
+
+    // Conteo de usuarios
+    const [uRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${tenant.tables.users}\``);
+
+    // Conteo de clientes
+    const [cRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${tenant.tables.clients}\``);
+
+    // Conteo de providers por tipo
+    let admins = 0;
+    let providers = 0;
+    try {
+      const [typeRows] = await conn.query(`
+        SELECT type, COUNT(*) AS c
+        FROM providers
+        GROUP BY type
+      `);
+      const map = new Map<string, number>();
+      (typeRows as any[]).forEach(r => map.set(r.type, Number(r.c)));
+      admins = map.get('admin') || 0;
+      providers = map.get('provider') || 0;
+    } catch (err: any) {
+      console.warn('providers table missing or incompatible in', tenant.id, err.code);
+    }
+
     return {
       tenantId: tenant.id,
       tenantName: tenant.name,
       users: Number((uRows as any)[0]?.c || 0),
       clients: Number((cRows as any)[0]?.c || 0),
-      admins: Number((aRows as any)[0]?.c || 0),
-    }
+      admins,
+      providers,
+    };
   } catch (e: any) {
-    console.error('DB error', tenant.id, e?.code || e?.message || e)
-    return { tenantId: tenant.id, tenantName: tenant.name, users: 0, clients: 0, admins: 0, error: e?.code || e?.message }
+    console.error('DB error', tenant.id, e?.code || e?.message || e);
+    return {
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      users: 0,
+      clients: 0,
+      admins: 0,
+      providers: 0,
+      error: e?.code || e?.message,
+    };
   } finally {
-    try { await conn?.end() } catch {}
+    try { await conn?.end(); } catch { }
   }
 }
 
+
 export default async function Page({ searchParams }: { searchParams?: { client?: string } }) {
   const tenants = await loadTenants()
-  const counts  = await Promise.all(tenants.map((t) => getTenantCounts(t)))
-  const orgs    = tenants.map((t) => ({ id: t.id, name: t.name }))
+  const counts = await Promise.all(tenants.map((t) => getTenantCounts(t)))
+  const orgs = tenants.map((t) => ({ id: t.id, name: t.name }))
   const selectedClient = (searchParams?.client || 'all').toLowerCase()
 
   return <HomePageClient orgs={orgs} counts={counts} selectedClient={selectedClient} />
