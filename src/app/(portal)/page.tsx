@@ -17,10 +17,10 @@ type TenantConfig = {
 export type TenantCounts = {
   tenantId: string
   tenantName: string
-  users: number
+  users: number          // ← será clients + admins + providers
   clients: number
-  admins: number
-  providers: number
+  admins: number         // providers.type = 'admin'
+  providers: number      // providers.type = 'provider'
   error?: string
 }
 
@@ -101,13 +101,11 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
   try {
     conn = await mysql.createConnection(base);
 
-    // Conteo de usuarios
-    const [uRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${tenant.tables.users}\``);
-
-    // Conteo de clientes
+    // ✅ Conteo de clientes
     const [cRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${tenant.tables.clients}\``);
+    const clients = Number((cRows as any)[0]?.c || 0);
 
-    // Conteo de providers por tipo
+    // ✅ Conteo por tipo en providers (admin vs provider)
     let admins = 0;
     let providers = 0;
     try {
@@ -117,18 +115,21 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
         GROUP BY type
       `);
       const map = new Map<string, number>();
-      (typeRows as any[]).forEach(r => map.set(r.type, Number(r.c)));
+      (typeRows as any[]).forEach(r => map.set(String(r.type), Number(r.c)));
       admins = map.get('admin') || 0;
       providers = map.get('provider') || 0;
     } catch (err: any) {
       console.warn('providers table missing or incompatible in', tenant.id, err.code);
     }
 
+    // ✅ "users" = suma de las 3 categorías solicitadas
+    const users = clients + admins + providers;
+
     return {
       tenantId: tenant.id,
       tenantName: tenant.name,
-      users: Number((uRows as any)[0]?.c || 0),
-      clients: Number((cRows as any)[0]?.c || 0),
+      users,
+      clients,
       admins,
       providers,
     };
@@ -154,6 +155,5 @@ export default async function Page({ searchParams }: { searchParams?: { client?:
   const counts = await Promise.all(tenants.map((t) => getTenantCounts(t)))
   const orgs = tenants.map((t) => ({ id: t.id, name: t.name }))
   const selectedClient = (searchParams?.client || 'all').toLowerCase()
-
   return <HomePageClient orgs={orgs} counts={counts} selectedClient={selectedClient} />
 }

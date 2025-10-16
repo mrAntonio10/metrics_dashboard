@@ -18,21 +18,14 @@ export type Org = { id: string; name: string }
 export type CountRow = {
   tenantId: string
   tenantName: string
-  users: number
+  users: number      // ahora viene pre-sumado (clients + admins + providers)
   clients: number
   admins: number
   providers: number
   error?: string
 }
-export default function HomePageClient({
-  orgs,
-  counts,
-  selectedClient,
-}: {
-  orgs: Org[]
-  counts: CountRow[]
-  selectedClient: string
-}) {
+export default function HomePageClient({ orgs, counts, selectedClient }: { orgs: Org[]; counts: CountRow[]; selectedClient: string }) {
+
   const router = useRouter()
   const pathname = usePathname()
   const search = useSearchParams()
@@ -54,15 +47,16 @@ export default function HomePageClient({
     [counts, selectedClient],
   )
 
-  const totalUsers = filtered.reduce((a, b) => a + b.users, 0)
+  // ✅ Total Users = suma de clients + admins + providers
+  const totalUsers = filtered.reduce((acc, r) => acc + r.clients + r.admins + r.providers, 0)
   const totalClients = filtered.reduce((a, b) => a + b.clients, 0)
   const totalAdmins = filtered.reduce((a, b) => a + b.admins, 0)
   const totalProviders = filtered.reduce((a, b) => a + b.providers, 0)
 
   const barData = filtered.map((row) => ({
     name: row.tenantName,
-    Users: row.users,
     Clients: row.clients,
+    Admins: row.admins,
     Providers: row.providers,
   }))
   const errored = filtered.filter((r) => r.error)
@@ -105,19 +99,48 @@ export default function HomePageClient({
 
       <div className="space-y-6">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <KpiCard title="Total Users" value={String(totalUsers)} change={0} changePeriod="now" icon={<Users className="h-4 w-4 text-muted-foreground" />} tooltip="Suma de usuarios por ambiente (consulta directa a BD)." />
-          <KpiCard title="Total Clients" value={String(totalClients)} change={0} changePeriod="now" icon={<CreditCard className="h-4 w-4 text-muted-foreground" />} tooltip="Suma de clientes por ambiente (consulta directa a BD)." />
-          <KpiCard title="Total Admins" value={String(totalAdmins)} change={0} changePeriod="now" icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />} tooltip="Usuarios con rol admin o is_admin=1." />
+          <KpiCard
+            title="Total Users"
+            value={String(totalUsers)}
+            change={0}
+            changePeriod="now"
+            icon={<Users className="h-4 w-4 text-muted-foreground" />}
+            tooltip="Suma de Clients + Admins + Providers (type) por ambientes filtrados."
+          />
+          <KpiCard
+            title="Total Clients"
+            value={String(totalClients)}
+            change={0}
+            changePeriod="now"
+            icon={<CreditCard className="h-4 w-4 text-muted-foreground" />}
+            tooltip="Cantidad total en tabla clients (ambientes filtrados)."
+          />
+          <KpiCard
+            title="Total Admins"
+            value={String(totalAdmins)}
+            change={0}
+            changePeriod="now"
+            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
+            tooltip="providers.type = 'admin' (ambientes filtrados)."
+          />
           <KpiCard
             title="Total Providers"
             value={String(totalProviders)}
             change={0}
             changePeriod="now"
             icon={<Users className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Usuarios con type='provider' en la tabla providers."
+            tooltip="providers.type = 'provider' (ambientes filtrados)."
           />
-          <KpiCard title="Environments" value={String(filtered.length)} change={0} changePeriod="now" icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />} tooltip="Cantidad de ambientes filtrados." />
+          <KpiCard
+            title="Environments"
+            value={String(filtered.length)}
+            change={0}
+            changePeriod="now"
+            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
+            tooltip="Cantidad de ambientes filtrados."
+          />
         </div>
+
 
         <Alert className="bg-primary/10 border-primary/20">
           <AlertTriangle className="h-4 w-4 !text-primary/80" />
@@ -129,7 +152,7 @@ export default function HomePageClient({
 
         <div className="grid gap-4 lg:grid-cols-1">
           <Card>
-            <CardHeader><CardTitle>Comparación por Ambiente (Usuarios vs Clientes)</CardTitle></CardHeader>
+            <CardHeader><CardTitle>Comparación por Ambiente (Clients vs Admins vs Providers)</CardTitle></CardHeader>
             <CardContent>
               <ChartContainer config={{}} className="h-64">
                 <BarChart data={barData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
@@ -137,9 +160,10 @@ export default function HomePageClient({
                   <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
                   <YAxis allowDecimals={false} />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Bar dataKey="Users" radius={4} fill="var(--color-chart-1)" />
-                  <Bar dataKey="Providers" radius={4} fill="var(--color-chart-3)" />
+                  {/* ✅ sin serie "Users" */}
                   <Bar dataKey="Clients" radius={4} fill="var(--color-chart-2)" />
+                  <Bar dataKey="Admins" radius={4} fill="var(--color-chart-4)" />
+                  <Bar dataKey="Providers" radius={4} fill="var(--color-chart-3)" />
                 </BarChart>
               </ChartContainer>
             </CardContent>
