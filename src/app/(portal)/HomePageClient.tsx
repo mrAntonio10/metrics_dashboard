@@ -155,8 +155,9 @@ export default function HomePageClient({
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-4">
           {filtered.map((t) => {
             const status = t.management?.status || ''
-            const date = t.management?.date ? new Date(t.management.date) : null
-
+            const date = t.management?.date
+              ? new Date(`${t.management.date}T00:00:00`) // fuerza interpretación local
+              : null
             // 📅 Calcular fecha límite = mismo día del siguiente mes
             const limitDate = date ? new Date(date) : null
             if (limitDate) limitDate.setMonth(limitDate.getMonth() + 1)
