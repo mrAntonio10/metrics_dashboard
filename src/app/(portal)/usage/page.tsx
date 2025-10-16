@@ -305,9 +305,9 @@ export default function UsagePage() {
             : <Badge variant="outline" className="border-red-500/50 text-red-600">Docker DOWN</Badge>
           }
 
-          {data && (
+          {availableDates.length > 0 && (
             <span className="text-xs text-muted-foreground">
-              Updated: {data?.timestamp?.toString().split('T')[0] ?? '—'}
+              Updated: {availableDates[availableDates.length - 1]}
             </span>
           )}
 
