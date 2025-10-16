@@ -263,6 +263,12 @@ export default function UsagePage() {
     return () => { cancel = true; };
   }, [availableDates, client]);
 
+
+  const filteredHistory = useMemo(() => {
+    if (date === 'live' || historySeries.length === 0) return historySeries;
+    return historySeries.filter((x) => x.date <= date);
+  }, [historySeries, date]);
+
   return (
     <ProtectedComponent permissionKey="page:usage" fallback={<AccessDeniedFallback />}>
       <PageHeader title="Usage Administration" description="Métricas reales de Docker por cliente, con histórico diario.">
@@ -301,10 +307,10 @@ export default function UsagePage() {
 
           {data && (
             <span className="text-xs text-muted-foreground">
-              Updated: {data.timestamp}
+              Updated: {data.timestamp.split('T')[0]}
             </span>
           )}
-          
+
           {loading && <span className="text-xs text-muted-foreground">Loading…</span>}
           {error && <span className="text-xs text-destructive">Error: {error}</span>}
         </div>
@@ -320,7 +326,7 @@ export default function UsagePage() {
             </CardHeader>
             <CardContent className="h-[320px]">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={historySeries}>
+                <LineChart data={filteredHistory}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" />
                   <YAxis yAxisId="left" domain={[0, 'auto']} tickFormatter={(v) => `${v}%`} />
