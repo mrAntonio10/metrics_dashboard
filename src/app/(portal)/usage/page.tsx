@@ -307,7 +307,7 @@ export default function UsagePage() {
 
           {data && (
             <span className="text-xs text-muted-foreground">
-              Updated: {data.timestamp.split('T')[0]}
+              Updated: {data?.timestamp?.toString().split('T')[0] ?? '—'}
             </span>
           )}
 
