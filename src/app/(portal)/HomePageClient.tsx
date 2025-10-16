@@ -1,12 +1,10 @@
-// src/app/(portal)/HomePageClient.tsx
 'use client'
 
 import { useMemo, useTransition } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { PageHeader } from '@/components/page-header'
-// ⛔️ Eliminado: import { TimeRangeFilter } from '@/components/time-range-filter'
 import { KpiCard } from '@/components/kpi-card'
-import { CreditCard, Users, AlertTriangle } from 'lucide-react'
+import { CreditCard, Users, AlertTriangle, CalendarClock } from 'lucide-react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
@@ -39,8 +37,6 @@ export default function HomePageClient({
   const pathname = usePathname()
   const search = useSearchParams()
   const [isPending, startTransition] = useTransition()
-
-  // ⛔️ Eliminado: const timeRange = '30d' as const
 
   const handleSelectClient = (val: string) => {
     startTransition(() => {
@@ -103,8 +99,6 @@ export default function HomePageClient({
               ))}
             </SelectContent>
           </Select>
-
-          {/* ⛔️ Eliminado: <TimeRangeFilter value={timeRange} onChange={() => {}} /> */}
         </div>
       </PageHeader>
 
@@ -123,6 +117,7 @@ export default function HomePageClient({
       )}
 
       <div className="space-y-6">
+        {/* KPIs globales */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             title="Total Users"
@@ -156,12 +151,18 @@ export default function HomePageClient({
           />
         </div>
 
+        {/* Cards por cliente */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-4">
           {filtered.map((t) => {
             const status = t.management?.status || ''
             const date = t.management?.date ? new Date(t.management.date) : null
-            const diffDays = date ? Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24)) : 0
-            const expired = status === 'TRIAL' && diffDays > 30
+
+            // 📅 Calcular fecha límite = mismo día del siguiente mes
+            const limitDate = date ? new Date(date) : null
+            if (limitDate) limitDate.setMonth(limitDate.getMonth() + 1)
+
+            // ⚠️ Determinar expiración
+            const expired = status === 'TRIAL' && limitDate && Date.now() >= limitDate.getTime()
 
             let nextLabel = ''
             let nextStatus = ''
@@ -191,17 +192,29 @@ export default function HomePageClient({
                 : expired
                   ? '⚠️ TRIAL EXPIRED'
                   : status === 'TRIAL'
-                    ? `⏳ TRIAL (${30 - diffDays} days left)`
-                    : '✅ SUBSCRIBED'
+                    ? `⏳ TRIAL (until ${limitDate?.toLocaleDateString()})`
+                    : `✅ SUBSCRIBED (renew by ${limitDate?.toLocaleDateString()})`
 
             return (
               <Card key={t.tenantId} className={`${color}`}>
                 <CardHeader>
-                  <CardTitle>{t.tenantName}</CardTitle>
+                  <CardTitle className="flex items-center gap-2">
+                    {t.tenantName}
+                    {limitDate && (
+                      <span className="flex items-center text-xs text-muted-foreground">
+                        <CalendarClock className="h-3 w-3 mr-1" />
+                        {limitDate.toLocaleDateString()}
+                      </span>
+                    )}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
                   <div className="text-sm font-semibold">{statusText}</div>
-                  {date && <div className="text-xs text-muted-foreground">Since: {date.toLocaleDateString()}</div>}
+                  {date && (
+                    <div className="text-xs text-muted-foreground">
+                      Since: {date.toLocaleDateString()}
+                    </div>
+                  )}
                   {nextLabel && (
                     <button
                       onClick={() => handleStatusChange(t.tenantId, nextStatus)}
@@ -216,7 +229,7 @@ export default function HomePageClient({
           })}
         </div>
 
-
+        {/* Chart comparativo */}
         <div className="grid gap-4 lg:grid-cols-1">
           <Card>
             <CardHeader>
