@@ -64,8 +64,10 @@ export default function HomePageClient({
     name: row.tenantName,
     Users: row.users,
     Clients: row.clients,
+    Admins: row.admins,
     Providers: row.providers,
   }))
+
   const errored = filtered.filter((r) => r.error)
 
   return (
@@ -171,6 +173,7 @@ export default function HomePageClient({
                   <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="Users" radius={4} fill="var(--color-chart-1)" />
                   <Bar dataKey="Clients" radius={4} fill="var(--color-chart-2)" />
+                  <Bar dataKey="Admins" radius={4} fill="var(--color-chart-4)" />
                   <Bar dataKey="Providers" radius={4} fill="var(--color-chart-3)" />
                 </BarChart>
               </ChartContainer>
