@@ -30,13 +30,13 @@ export interface TicketsResponse {
     pagination: Pagination;
     filters: {
       availableCompanies: string[];
-      availableStatuses?: string[];   // 👈 nuevas listas del backend (opcional)
-      availableUrgencies?: string[];  // 👈 nuevas listas del backend (opcional)
+      availableStatuses?: string[];
+      availableUrgencies?: string[];
       appliedFilters: {
         month: string;
         company: string;
-        status?: string;              // 👈 reflejo de lo aplicado por backend
-        urgency?: string;             // 👈 reflejo de lo aplicado por backend
+        status?: string;
+        urgency?: string;
       };
     };
   };
@@ -55,16 +55,12 @@ export interface CompaniesResponse {
 }
 
 export interface TicketFilters {
-  month: string;                // 'all' | 'YYYY-MM'
-  company: string;              // 'all' | nombre exacto
-  status: string;               // 'all' | 'Resolved' | 'Created' | ...
-  urgency: string;              // 'all' | 'High' | 'Medium' | ...
+  month: string;    // 'all' | 'YYYY-MM'
+  company: string;  // 'all' | nombre cliente
+  status: string;   // 'all' | 'Resolved' | ...
+  urgency: string;  // 'all' | 'High' | ...
   page: number;
   pageSize: number;
-
-  // opcionales (catálogos que puede devolver n8n)
-  availableStatuses?: string[];
-  availableUrgencies?: string[];
 }
 
 const DEFAULT_PAGINATION: Pagination = {
@@ -83,7 +79,7 @@ export const useTickets = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ ahora incluye status y urgency
+  // ✅ filtros: NO guardamos catálogos aquí para no re-disparar el efecto
   const [filters, setFilters] = useState<TicketFilters>({
     month: 'all',
     company: 'all',
@@ -91,93 +87,105 @@ export const useTickets = () => {
     urgency: 'all',
     page: 1,
     pageSize: 10,
-    availableStatuses: undefined,
-    availableUrgencies: undefined,
   });
 
-  // Cargar compañías al montar el componente
+  // ✅ catálogos (no afectan el efecto de fetchTickets)
+  const [availableStatuses, setAvailableStatuses] = useState<string[] | undefined>(undefined);
+  const [availableUrgencies, setAvailableUrgencies] = useState<string[] | undefined>(undefined);
+
+  // -------- Companies: solo una vez al montar
   useEffect(() => {
-    fetchCompanies();
-  }, []);
-
-  // Cargar tickets cuando cambien los filtros
-  useEffect(() => {
-    fetchTickets();
-  }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const fetchCompanies = useCallback(async () => {
-    try {
-      const response = await fetch('/api/tickets/companies');
-      const data: CompaniesResponse = await response.json();
-
-      if (data.success) {
-        setCompanies([{ value: 'all', label: 'All Clients' }, ...data.data.companies]);
+    (async () => {
+      try {
+        const res = await fetch('/api/tickets/companies');
+        const data: CompaniesResponse = await res.json();
+        if (data.success) {
+          setCompanies([{ value: 'all', label: 'All Clients' }, ...data.data.companies]);
+        }
+      } catch (err) {
+        console.error('Error fetching companies:', err);
       }
-    } catch (err) {
-      console.error('Error fetching companies:', err);
-    }
+    })();
   }, []);
 
-  const fetchTickets = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  // -------- Tickets: 1ra vez con 'all', luego SOLO cuando cambian los filtros
+  useEffect(() => {
+    const fetchTickets = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams();
+        // Solo mandamos filtros que no son 'all'
+        if (filters.month !== 'all')   params.append('month', filters.month);
+        if (filters.company !== 'all') params.append('company', filters.company);
+        if (filters.status !== 'all')  params.append('status', filters.status);
+        if (filters.urgency !== 'all') params.append('urgency', filters.urgency);
+        params.append('page', String(filters.page));
+        params.append('pageSize', String(filters.pageSize));
 
-    try {
-      const params = new URLSearchParams();
-      if (filters.month && filters.month !== 'all')   params.append('month', filters.month);
-      if (filters.company && filters.company !== 'all') params.append('company', filters.company);
-      if (filters.status && filters.status !== 'all')   params.append('status', filters.status);     // 👈 nuevo
-      if (filters.urgency && filters.urgency !== 'all')  params.append('urgency', filters.urgency);   // 👈 nuevo
-      params.append('page', filters.page.toString());
-      params.append('pageSize', filters.pageSize.toString());
+        const url = `/api/tickets?${params.toString()}`;
+        const res = await fetch(url, { cache: 'no-store' });
+        const data: TicketsResponse = await res.json();
 
-      const url = `/api/tickets?${params.toString()}`;
-      const response = await fetch(url);
-      const data: TicketsResponse = await response.json();
+        if (!data.success) throw new Error('Backend error');
 
-      if (data.success) {
         setTickets(data.data.tickets);
         setPagination(data.data.pagination);
 
-        // Catálogos disponibles (si vienen del backend)
-        const availableStatuses  = data.data.filters?.availableStatuses ?? filters.availableStatuses;
-        const availableUrgencies = data.data.filters?.availableUrgencies ?? filters.availableUrgencies;
-
-        setFilters(prev => ({
-          ...prev,
-          availableStatuses,
-          availableUrgencies,
-        }));
-      } else {
-        setError('Error fetching tickets');
+        // Guardar catálogos SIN tocar filters (evita 2da llamada)
+        if (Array.isArray(data.data.filters?.availableStatuses)) {
+          setAvailableStatuses(data.data.filters.availableStatuses!);
+        }
+        if (Array.isArray(data.data.filters?.availableUrgencies)) {
+          setAvailableUrgencies(data.data.filters.availableUrgencies!);
+        }
+      } catch (err: any) {
+        console.error('Error fetching tickets:', err);
+        setError(err?.message ?? 'Network error occurred');
+        setTickets([]);
+        setPagination(DEFAULT_PAGINATION);
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      setError('Network error occurred');
-      console.error('Error fetching tickets:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [filters.month, filters.company, filters.status, filters.urgency, filters.page, filters.pageSize, filters.availableStatuses, filters.availableUrgencies]);
+    };
 
-  const updateFilters = useCallback((newFilters: Partial<TicketFilters>) => {
+    fetchTickets();
+  // 👇 Dependencias SOLO de filtros base. Nada de catálogos aquí.
+  }, [filters.month, filters.company, filters.status, filters.urgency, filters.page, filters.pageSize]);
+
+  // -------- Helpers para actualizar filtros evitando sets innecesarios
+  const updateFilters = useCallback((patch: Partial<TicketFilters>) => {
     setFilters(prev => {
-      const next = { ...prev, ...newFilters };
+      const next: TicketFilters = { ...prev, ...patch };
 
-      // Si cambian filtros base (no la página), vuelve a page 1
+      // Si cambian filtros base (no 'page'), resetea page a 1
       const baseKeys: (keyof TicketFilters)[] = ['month', 'company', 'status', 'urgency', 'pageSize'];
-      const changedBase = Object.keys(newFilters).some(k => baseKeys.includes(k as keyof TicketFilters) && k !== 'page');
+      const changedBase = Object.keys(patch).some(
+        (k) => baseKeys.includes(k as keyof TicketFilters) && k !== 'page'
+      );
       if (changedBase) next.page = 1;
 
-      return next;
+      // Evita setState si no cambió nada (reduce renders/llamadas)
+      const unchanged =
+        prev.month === next.month &&
+        prev.company === next.company &&
+        prev.status === next.status &&
+        prev.urgency === next.urgency &&
+        prev.page === next.page &&
+        prev.pageSize === next.pageSize;
+
+      return unchanged ? prev : next;
     });
   }, []);
 
   const goToPage = useCallback((page: number) => {
-    setFilters(prev => ({ ...prev, page: Math.max(1, page) }));
+    setFilters(prev => (prev.page === page ? prev : { ...prev, page }));
   }, []);
 
   const changePageSize = useCallback((pageSize: number) => {
-    setFilters(prev => ({ ...prev, pageSize, page: 1 }));
+    setFilters(prev =>
+      prev.pageSize === pageSize ? prev : { ...prev, pageSize, page: 1 }
+    );
   }, []);
 
   return {
@@ -190,6 +198,12 @@ export const useTickets = () => {
     updateFilters,
     goToPage,
     changePageSize,
-    refetch: fetchTickets,
+    // 👉 expón los catálogos para llenar los combos
+    catalogs: {
+      availableStatuses,
+      availableUrgencies,
+    },
+    // por si quieres forzar recarga manual
+    // refetch: () => setFilters(f => ({ ...f })), // trigger suave sin cambiar valores
   };
 };
