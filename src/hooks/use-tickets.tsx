@@ -1,28 +1,15 @@
 // src/hooks/use-tickets.ts
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 
-export interface Ticket {
-  ticketId: string;
-  companyName: string;
-  contactEmail: string;
-  userType: string;
-  applicationModule: string;
-  issueStarted: string;
-  description: string;
-  urgencyLevel: string;
-  status: string;
-  comments: string;
+export interface Ticket { /* igual que tu interfaz */ 
+  ticketId: string; companyName: string; contactEmail: string; userType: string;
+  applicationModule: string; issueStarted: string; description: string;
+  urgencyLevel: string; status: string; comments: string;
 }
-
 export interface Pagination {
-  currentPage: number;
-  pageSize: number;
-  totalItems: number;
-  totalPages: number;
-  hasNextPage: boolean;
-  hasPreviousPage: boolean;
+  currentPage: number; pageSize: number; totalItems: number; totalPages: number;
+  hasNextPage: boolean; hasPreviousPage: boolean;
 }
-
 export interface TicketsResponse {
   success: boolean;
   data: {
@@ -32,27 +19,12 @@ export interface TicketsResponse {
       availableCompanies: string[];
       availableStatuses?: string[];
       availableUrgencies?: string[];
-      appliedFilters: {
-        month: string;
-        company: string;
-        status?: string;
-        urgency?: string;
-      };
+      appliedFilters: { month: string; company: string; status?: string; urgency?: string; };
     };
   };
 }
-
-export interface Company {
-  value: string;
-  label: string;
-}
-
-export interface CompaniesResponse {
-  success: boolean;
-  data: {
-    companies: Company[];
-  };
-}
+export interface Company { value: string; label: string; }
+export interface CompaniesResponse { success: boolean; data: { companies: Company[] } }
 
 export interface TicketFilters {
   month: string;    // 'all' | 'YYYY-MM'
@@ -64,12 +36,7 @@ export interface TicketFilters {
 }
 
 const DEFAULT_PAGINATION: Pagination = {
-  currentPage: 1,
-  pageSize: 10,
-  totalItems: 0,
-  totalPages: 0,
-  hasNextPage: false,
-  hasPreviousPage: false,
+  currentPage: 1, pageSize: 10, totalItems: 0, totalPages: 0, hasNextPage: false, hasPreviousPage: false,
 };
 
 export const useTickets = () => {
@@ -79,25 +46,23 @@ export const useTickets = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // ✅ filtros: NO guardamos catálogos aquí para no re-disparar el efecto
   const [filters, setFilters] = useState<TicketFilters>({
-    month: 'all',
-    company: 'all',
-    status: 'all',
-    urgency: 'all',
-    page: 1,
-    pageSize: 10,
+    month: 'all', company: 'all', status: 'all', urgency: 'all', page: 1, pageSize: 10,
   });
 
-  // ✅ catálogos (no afectan el efecto de fetchTickets)
-  const [availableStatuses, setAvailableStatuses] = useState<string[] | undefined>(undefined);
+  // catálogos opcionales (si los manda n8n). No forman parte de 'filters' para no disparar llamadas.
+  const [availableStatuses, setAvailableStatuses]   = useState<string[] | undefined>(undefined);
   const [availableUrgencies, setAvailableUrgencies] = useState<string[] | undefined>(undefined);
 
-  // -------- Companies: solo una vez al montar
+  // Companies: solo una vez (si Strict Mode duplica, lo controlamos con ref)
+  const fetchedCompaniesRef = useRef(false);
   useEffect(() => {
+    if (fetchedCompaniesRef.current) return;
+    fetchedCompaniesRef.current = true;
+
     (async () => {
       try {
-        const res = await fetch('/api/tickets/companies');
+        const res = await fetch('/api/tickets/companies', { cache: 'no-store' });
         const data: CompaniesResponse = await res.json();
         if (data.success) {
           setCompanies([{ value: 'all', label: 'All Clients' }, ...data.data.companies]);
@@ -108,71 +73,89 @@ export const useTickets = () => {
     })();
   }, []);
 
-  // -------- Tickets: 1ra vez con 'all', luego SOLO cuando cambian los filtros
+  // Construye el QS a partir de filtros (solo incluye filtros != 'all')
+  const qs = useMemo(() => {
+    const params = new URLSearchParams();
+    if (filters.month   !== 'all') params.set('month', filters.month);
+    if (filters.company !== 'all') params.set('company', filters.company);
+    if (filters.status  !== 'all') params.set('status', filters.status);
+    if (filters.urgency !== 'all') params.set('urgency', filters.urgency);
+    params.set('page', String(filters.page));
+    params.set('pageSize', String(filters.pageSize));
+    return params.toString();
+  }, [filters.month, filters.company, filters.status, filters.urgency, filters.page, filters.pageSize]);
+
+  // Tickets: SOLO cuando cambia 'qs'
+  const lastQsRef = useRef<string>('');
+  const inFlightRef = useRef<boolean>(false);
+
   useEffect(() => {
-    const fetchTickets = async () => {
-      setLoading(true);
-      setError(null);
+    // Evita fetch duplicado si el QS no cambió o si ya hay uno en vuelo
+    if (qs === lastQsRef.current && inFlightRef.current) return;
+
+    const controller = new AbortController();
+    const run = async () => {
       try {
-        const params = new URLSearchParams();
-        // Solo mandamos filtros que no son 'all'
-        if (filters.month !== 'all')   params.append('month', filters.month);
-        if (filters.company !== 'all') params.append('company', filters.company);
-        if (filters.status !== 'all')  params.append('status', filters.status);
-        if (filters.urgency !== 'all') params.append('urgency', filters.urgency);
-        params.append('page', String(filters.page));
-        params.append('pageSize', String(filters.pageSize));
+        inFlightRef.current = true;
+        setLoading(true);
+        setError(null);
 
-        const url = `/api/tickets?${params.toString()}`;
-        const res = await fetch(url, { cache: 'no-store' });
+        const res = await fetch(`/api/tickets?${qs}`, { cache: 'no-store', signal: controller.signal });
         const data: TicketsResponse = await res.json();
-
         if (!data.success) throw new Error('Backend error');
 
         setTickets(data.data.tickets);
         setPagination(data.data.pagination);
 
-        // Guardar catálogos SIN tocar filters (evita 2da llamada)
+        // catálogos (no tocan 'filters' → no disparan otra llamada)
         if (Array.isArray(data.data.filters?.availableStatuses)) {
           setAvailableStatuses(data.data.filters.availableStatuses!);
         }
         if (Array.isArray(data.data.filters?.availableUrgencies)) {
           setAvailableUrgencies(data.data.filters.availableUrgencies!);
         }
+
+        lastQsRef.current = qs;
       } catch (err: any) {
-        console.error('Error fetching tickets:', err);
-        setError(err?.message ?? 'Network error occurred');
-        setTickets([]);
-        setPagination(DEFAULT_PAGINATION);
+        if (err?.name !== 'AbortError') {
+          console.error('Error fetching tickets:', err);
+          setError(err?.message ?? 'Network error occurred');
+          setTickets([]);
+          setPagination(DEFAULT_PAGINATION);
+        }
       } finally {
+        inFlightRef.current = false;
         setLoading(false);
       }
     };
 
-    fetchTickets();
-  // 👇 Dependencias SOLO de filtros base. Nada de catálogos aquí.
-  }, [filters.month, filters.company, filters.status, filters.urgency, filters.page, filters.pageSize]);
+    run();
+    return () => controller.abort();
+  }, [qs]);
 
-  // -------- Helpers para actualizar filtros evitando sets innecesarios
+  // Helpers — no setean si no cambia el valor
   const updateFilters = useCallback((patch: Partial<TicketFilters>) => {
     setFilters(prev => {
-      const next: TicketFilters = { ...prev, ...patch };
+      const next = { ...prev, ...patch };
 
-      // Si cambian filtros base (no 'page'), resetea page a 1
-      const baseKeys: (keyof TicketFilters)[] = ['month', 'company', 'status', 'urgency', 'pageSize'];
-      const changedBase = Object.keys(patch).some(
-        (k) => baseKeys.includes(k as keyof TicketFilters) && k !== 'page'
-      );
-      if (changedBase) next.page = 1;
+      // Reset page si cambian filtros base
+      if (
+        (patch.month   !== undefined && patch.month   !== prev.month)   ||
+        (patch.company !== undefined && patch.company !== prev.company) ||
+        (patch.status  !== undefined && patch.status  !== prev.status)  ||
+        (patch.urgency !== undefined && patch.urgency !== prev.urgency) ||
+        (patch.pageSize !== undefined && patch.pageSize !== prev.pageSize)
+      ) {
+        next.page = 1;
+      }
 
-      // Evita setState si no cambió nada (reduce renders/llamadas)
       const unchanged =
-        prev.month === next.month &&
+        prev.month   === next.month   &&
         prev.company === next.company &&
-        prev.status === next.status &&
+        prev.status  === next.status  &&
         prev.urgency === next.urgency &&
-        prev.page === next.page &&
-        prev.pageSize === next.pageSize;
+        prev.page    === next.page    &&
+        prev.pageSize=== next.pageSize;
 
       return unchanged ? prev : next;
     });
@@ -183,9 +166,7 @@ export const useTickets = () => {
   }, []);
 
   const changePageSize = useCallback((pageSize: number) => {
-    setFilters(prev =>
-      prev.pageSize === pageSize ? prev : { ...prev, pageSize, page: 1 }
-    );
+    setFilters(prev => (prev.pageSize === pageSize ? prev : { ...prev, pageSize, page: 1 }));
   }, []);
 
   return {
@@ -198,12 +179,9 @@ export const useTickets = () => {
     updateFilters,
     goToPage,
     changePageSize,
-    // 👉 expón los catálogos para llenar los combos
     catalogs: {
       availableStatuses,
       availableUrgencies,
     },
-    // por si quieres forzar recarga manual
-    // refetch: () => setFilters(f => ({ ...f })), // trigger suave sin cambiar valores
   };
 };
