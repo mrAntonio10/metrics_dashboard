@@ -27,7 +27,7 @@ const ticketTypes = [
 
 // Helper para generar opciones de mes
 const generateMonthOptions = () => {
-  const options = [{ value: '', label: 'All Months' }];
+  const options = [{ value: 'all', label: 'All Months' }];
   const currentDate = new Date();
   
   for (let i = 0; i < 12; i++) {
