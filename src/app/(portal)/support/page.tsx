@@ -11,34 +11,15 @@ import { LineChart, BarChart, Line, Bar, CartesianGrid, XAxis, YAxis } from 'rec
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { ProtectedComponent } from '@/hooks/use-permission';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { Calendar, CalendarDays } from 'lucide-react';
+import DatePicker from 'react-datepicker';
+import "react-datepicker/dist/react-datepicker.css";
 
 const slaData = [
   { name: 'First Response', goal: 95, actual: 97 },
   { name: 'Resolution', goal: 90, actual: 88 },
 ];
-
-const ticketTypes = [
-  { value: 'all', label: 'All Ticket Types' },
-  { value: 'bug', label: 'Bug Report' },
-  { value: 'feature', label: 'Feature Request' },
-  { value: 'billing', label: 'Billing Inquiry' },
-  { value: 'technical', label: 'Technical Support' },
-];
-
-// Helper para generar opciones de mes con mes actual por defecto
-const generateMonthOptions = () => {
-  const options = [{ value: 'all', label: 'All Months' }];
-  const currentDate = new Date();
-  
-  for (let i = 0; i < 12; i++) {
-    const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
-    const value = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    const label = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-    options.push({ value, label });
-  }
-  
-  return options;
-};
 
 // Helper para obtener el mes actual
 const getCurrentMonth = () => {
@@ -48,6 +29,8 @@ const getCurrentMonth = () => {
 
 export default function SupportPage() {
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'custom'>('30d');
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  
   const {
     tickets,
     companies,
@@ -60,7 +43,19 @@ export default function SupportPage() {
     changePageSize,
   } = useTickets();
 
-  const monthOptions = useMemo(() => generateMonthOptions(), []);
+  // Manejar cambio de fecha en el date picker
+  const handleDateChange = (date: Date | null) => {
+    if (date) {
+      setSelectedDate(date);
+      const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      updateFilters({ month: monthYear });
+    }
+  };
+
+  // Reset a "All Months"
+  const handleClearDate = () => {
+    updateFilters({ month: 'all' });
+  };
 
   // Calcular KPIs basados en tickets reales
   const kpis = useMemo(() => {
@@ -117,35 +112,32 @@ export default function SupportPage() {
               ))}
             </SelectContent>
           </Select>
-          
-          <Select>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by Ticket Type..." />
-            </SelectTrigger>
-            <SelectContent>
-              {ticketTypes.map(type => (
-                <SelectItem key={type.value} value={type.value}>
-                  {type.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
 
-          <Select
-            value={filters.month}
-            onValueChange={(value) => updateFilters({ month: value })}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by Month..." />
-            </SelectTrigger>
-            <SelectContent>
-              {monthOptions.map(option => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Date Picker personalizado */}
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <DatePicker
+                selected={filters.month !== 'all' ? selectedDate : null}
+                onChange={handleDateChange}
+                dateFormat="MM/yyyy"
+                showMonthYearPicker
+                placeholderText="Select Month/Year"
+                className="w-[140px] px-3 py-2 text-sm border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                wrapperClassName="w-full"
+                calendarClassName="!font-sans"
+              />
+            </div>
+            {filters.month !== 'all' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClearDate}
+                className="px-2"
+              >
+                All Months
+              </Button>
+            )}
+          </div>
           
           <TimeRangeFilter value={timeRange} onChange={setTimeRange} />
         </div>
