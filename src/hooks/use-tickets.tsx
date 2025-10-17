@@ -1,15 +1,41 @@
 // src/hooks/use-tickets.ts
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 
-export interface Ticket { /* igual que tu interfaz */ 
-  ticketId: string; companyName: string; contactEmail: string; userType: string;
-  applicationModule: string; issueStarted: string; description: string;
-  urgencyLevel: string; status: string; comments: string;
+export interface Ticket {
+  ticketId: string;
+  companyName: string;
+  contactEmail: string;
+  userType: string;
+  applicationModule: string;
+  issueStarted: string;
+  description: string;
+  urgencyLevel: string;
+  status: string;
+  comments: string;
+
+  // ➜ opcionales (si el backend puede enviarlos)
+  firstResponseAt?: string;       // ISO
+  resolvedAt?: string;            // ISO
+  firstResponseMinutes?: number;  // minutos hasta primera respuesta
+  resolutionMinutes?: number;     // minutos hasta resolución
 }
+
+export interface SlaPolicy {
+  goalFirstResponsePercent: number;     // p.ej. 95
+  goalResolutionPercent: number;        // p.ej. 90
+  targetFirstResponseMinutes: number;   // p.ej. 240 (4h)
+  targetResolutionMinutes: number;      // p.ej. 2880 (48h)
+}
+
 export interface Pagination {
-  currentPage: number; pageSize: number; totalItems: number; totalPages: number;
-  hasNextPage: boolean; hasPreviousPage: boolean;
+  currentPage: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
 }
+
 export interface TicketsResponse {
   success: boolean;
   data: {
@@ -19,24 +45,44 @@ export interface TicketsResponse {
       availableCompanies: string[];
       availableStatuses?: string[];
       availableUrgencies?: string[];
-      appliedFilters: { month: string; company: string; status?: string; urgency?: string; };
+      // (opcional) política SLA aplicada por backend
+      slaPolicy?: SlaPolicy;
+      appliedFilters: {
+        month: string;
+        company: string;
+        status?: string;
+        urgency?: string;
+      };
     };
   };
 }
-export interface Company { value: string; label: string; }
-export interface CompaniesResponse { success: boolean; data: { companies: Company[] } }
+
+export interface Company {
+  value: string;
+  label: string;
+}
+
+export interface CompaniesResponse {
+  success: boolean;
+  data: { companies: Company[] };
+}
 
 export interface TicketFilters {
-  month: string;    // 'all' | 'YYYY-MM'
-  company: string;  // 'all' | nombre cliente
-  status: string;   // 'all' | 'Resolved' | ...
-  urgency: string;  // 'all' | 'High' | ...
+  month: string;     // 'all' | 'YYYY-MM'
+  company: string;   // 'all' | nombre cliente
+  status: string;    // 'all' | 'Resolved' | ...
+  urgency: string;   // 'all' | 'High' | ...
   page: number;
   pageSize: number;
 }
 
 const DEFAULT_PAGINATION: Pagination = {
-  currentPage: 1, pageSize: 10, totalItems: 0, totalPages: 0, hasNextPage: false, hasPreviousPage: false,
+  currentPage: 1,
+  pageSize: 10,
+  totalItems: 0,
+  totalPages: 0,
+  hasNextPage: false,
+  hasPreviousPage: false,
 };
 
 export const useTickets = () => {
@@ -47,14 +93,20 @@ export const useTickets = () => {
   const [error, setError] = useState<string | null>(null);
 
   const [filters, setFilters] = useState<TicketFilters>({
-    month: 'all', company: 'all', status: 'all', urgency: 'all', page: 1, pageSize: 10,
+    month: 'all',
+    company: 'all',
+    status: 'all',
+    urgency: 'all',
+    page: 1,
+    pageSize: 10,
   });
 
-  // catálogos opcionales (si los manda n8n). No forman parte de 'filters' para no disparar llamadas.
-  const [availableStatuses, setAvailableStatuses]   = useState<string[] | undefined>(undefined);
-  const [availableUrgencies, setAvailableUrgencies] = useState<string[] | undefined>(undefined);
+  // catálogos opcionales (si los manda n8n). Fuera de 'filters' para no disparar llamadas.
+  const [availableStatuses, setAvailableStatuses] = useState<string[]>();
+  const [availableUrgencies, setAvailableUrgencies] = useState<string[]>();
+  const [slaPolicy, setSlaPolicy] = useState<SlaPolicy | undefined>(undefined);
 
-  // Companies: solo una vez (si Strict Mode duplica, lo controlamos con ref)
+  // Cargar compañías una sola vez (protegido contra StrictMode)
   const fetchedCompaniesRef = useRef(false);
   useEffect(() => {
     if (fetchedCompaniesRef.current) return;
@@ -64,7 +116,7 @@ export const useTickets = () => {
       try {
         const res = await fetch('/api/tickets/companies', { cache: 'no-store' });
         const data: CompaniesResponse = await res.json();
-        if (data.success) {
+        if (data?.success && Array.isArray(data.data?.companies)) {
           setCompanies([{ value: 'all', label: 'All Clients' }, ...data.data.companies]);
         }
       } catch (err) {
@@ -73,47 +125,65 @@ export const useTickets = () => {
     })();
   }, []);
 
-  // Construye el QS a partir de filtros (solo incluye filtros != 'all')
+  // Construir querystring a partir de filtros (incluir solo los != 'all')
   const qs = useMemo(() => {
     const params = new URLSearchParams();
-    if (filters.month   !== 'all') params.set('month', filters.month);
+    if (filters.month !== 'all') params.set('month', filters.month);
     if (filters.company !== 'all') params.set('company', filters.company);
-    if (filters.status  !== 'all') params.set('status', filters.status);
+    if (filters.status !== 'all') params.set('status', filters.status);
     if (filters.urgency !== 'all') params.set('urgency', filters.urgency);
     params.set('page', String(filters.page));
     params.set('pageSize', String(filters.pageSize));
     return params.toString();
-  }, [filters.month, filters.company, filters.status, filters.urgency, filters.page, filters.pageSize]);
+  }, [
+    filters.month,
+    filters.company,
+    filters.status,
+    filters.urgency,
+    filters.page,
+    filters.pageSize,
+  ]);
 
-  // Tickets: SOLO cuando cambia 'qs'
+  // Evitar refetch duplicados
   const lastQsRef = useRef<string>('');
   const inFlightRef = useRef<boolean>(false);
 
+  // Fetch de tickets cuando cambia 'qs'
   useEffect(() => {
-    // Evita fetch duplicado si el QS no cambió o si ya hay uno en vuelo
+    // si no cambió el qs y hay petición en vuelo, no dispares otra
     if (qs === lastQsRef.current && inFlightRef.current) return;
 
     const controller = new AbortController();
+
     const run = async () => {
       try {
         inFlightRef.current = true;
         setLoading(true);
         setError(null);
 
-        const res = await fetch(`/api/tickets?${qs}`, { cache: 'no-store', signal: controller.signal });
+        const res = await fetch(`/api/tickets?${qs}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
         const data: TicketsResponse = await res.json();
-        if (!data.success) throw new Error('Backend error');
 
-        setTickets(data.data.tickets);
-        setPagination(data.data.pagination);
+        if (!data?.success) throw new Error('Backend error');
 
-        // catálogos (no tocan 'filters' → no disparan otra llamada)
-        if (Array.isArray(data.data.filters?.availableStatuses)) {
-          setAvailableStatuses(data.data.filters.availableStatuses!);
-        }
-        if (Array.isArray(data.data.filters?.availableUrgencies)) {
-          setAvailableUrgencies(data.data.filters.availableUrgencies!);
-        }
+        // Datos principales
+        setTickets(Array.isArray(data.data?.tickets) ? data.data.tickets : []);
+        setPagination(data.data?.pagination ?? DEFAULT_PAGINATION);
+
+        // Catálogos opcionales
+        const f = data.data?.filters;
+        if (Array.isArray(f?.availableStatuses)) setAvailableStatuses(f!.availableStatuses);
+        else setAvailableStatuses(undefined);
+
+        if (Array.isArray(f?.availableUrgencies)) setAvailableUrgencies(f!.availableUrgencies);
+        else setAvailableUrgencies(undefined);
+
+        // Política SLA opcional
+        if (f?.slaPolicy) setSlaPolicy(f.slaPolicy);
+        else setSlaPolicy(undefined);
 
         lastQsRef.current = qs;
       } catch (err: any) {
@@ -122,6 +192,9 @@ export const useTickets = () => {
           setError(err?.message ?? 'Network error occurred');
           setTickets([]);
           setPagination(DEFAULT_PAGINATION);
+          setAvailableStatuses(undefined);
+          setAvailableUrgencies(undefined);
+          setSlaPolicy(undefined);
         }
       } finally {
         inFlightRef.current = false;
@@ -133,29 +206,28 @@ export const useTickets = () => {
     return () => controller.abort();
   }, [qs]);
 
-  // Helpers — no setean si no cambia el valor
+  // Helpers
   const updateFilters = useCallback((patch: Partial<TicketFilters>) => {
     setFilters(prev => {
-      const next = { ...prev, ...patch };
+      const next: TicketFilters = { ...prev, ...patch };
 
-      // Reset page si cambian filtros base
-      if (
-        (patch.month   !== undefined && patch.month   !== prev.month)   ||
+      // resetear page si cambian filtros base o pageSize
+      const baseChanged =
+        (patch.month !== undefined && patch.month !== prev.month) ||
         (patch.company !== undefined && patch.company !== prev.company) ||
-        (patch.status  !== undefined && patch.status  !== prev.status)  ||
+        (patch.status !== undefined && patch.status !== prev.status) ||
         (patch.urgency !== undefined && patch.urgency !== prev.urgency) ||
-        (patch.pageSize !== undefined && patch.pageSize !== prev.pageSize)
-      ) {
-        next.page = 1;
-      }
+        (patch.pageSize !== undefined && patch.pageSize !== prev.pageSize);
+
+      if (baseChanged) next.page = 1;
 
       const unchanged =
-        prev.month   === next.month   &&
+        prev.month === next.month &&
         prev.company === next.company &&
-        prev.status  === next.status  &&
+        prev.status === next.status &&
         prev.urgency === next.urgency &&
-        prev.page    === next.page    &&
-        prev.pageSize=== next.pageSize;
+        prev.page === next.page &&
+        prev.pageSize === next.pageSize;
 
       return unchanged ? prev : next;
     });
@@ -166,7 +238,9 @@ export const useTickets = () => {
   }, []);
 
   const changePageSize = useCallback((pageSize: number) => {
-    setFilters(prev => (prev.pageSize === pageSize ? prev : { ...prev, pageSize, page: 1 }));
+    setFilters(prev =>
+      prev.pageSize === pageSize ? prev : { ...prev, pageSize, page: 1 },
+    );
   }, []);
 
   return {
@@ -183,5 +257,6 @@ export const useTickets = () => {
       availableStatuses,
       availableUrgencies,
     },
+    slaPolicy, // ➜ para calcular SLA Attainment en el componente
   };
 };

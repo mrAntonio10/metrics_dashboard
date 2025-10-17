@@ -1,8 +1,8 @@
+// src/app/(support)/page.tsx
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { PageHeader } from '@/components/page-header';
-import { TimeRangeFilter } from '@/components/time-range-filter';
 import { KpiCard } from '@/components/kpi-card';
 import { TicketsTable } from '@/components/tickets-table';
 import { useTickets } from '@/hooks/use-tickets';
@@ -15,15 +15,25 @@ import { Button } from '@/components/ui/button';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 
-const slaData = [
-  { name: 'First Response', goal: 95, actual: 97 },
-  { name: 'Resolution', goal: 90, actual: 88 },
-];
+// Fallbacks de SLA si el backend no envía política
+const SLA_DEFAULTS = {
+  goalFirstResponsePercent: 95,
+  goalResolutionPercent: 90,
+  targetFirstResponseMinutes: 240,  // 4h
+  targetResolutionMinutes: 2880,    // 48h
+};
+
+const diffMinutes = (a?: string, b?: string) => {
+  if (!a || !b) return undefined;
+  const tA = new Date(a).getTime();
+  const tB = new Date(b).getTime();
+  if (isNaN(tA) || isNaN(tB)) return undefined;
+  return Math.max(0, Math.round((tA - tB) / 60000));
+};
 
 export default function SupportPage() {
   // ➜ Filtros que viajan al webhook (company, month, status, urgency)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'custom'>('30d');
 
   const {
     tickets,            // datos del webhook (ya filtrados por n8n)
@@ -31,44 +41,43 @@ export default function SupportPage() {
     pagination,         // paginación del backend (n8n)
     loading,
     error,
-    filters,            // { month, company, status?, urgency?, availableStatuses?, availableUrgencies? }
+    filters,            // { month, company, status, urgency, ... }
     updateFilters,
     goToPage,
     changePageSize,
+    catalogs,           // { availableStatuses?, availableUrgencies? }
+    slaPolicy,          // política SLA opcional
   } = useTickets();
 
   // Month (DatePicker) → viaja al webhook
   const handleDateChange = (date: Date | null) => {
-    if (date) {
-      setSelectedDate(date);
-      const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      updateFilters({ month: monthYear });
-      goToPage(1);
-    }
+    if (!date) return;
+    setSelectedDate(date);
+    const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    updateFilters({ month: monthYear }); // no llames goToPage(1): el hook ya lo resetea
   };
 
   const handleClearDate = () => {
     setSelectedDate(null);
-    updateFilters({ month: 'all' });
-    goToPage(1);
+    updateFilters({ month: 'all' }); // el hook resetea page
   };
 
-  // Opciones para combos (si n8n ya las manda, úsales; si no, deduce desde tickets)
+  // Opciones para combos (si n8n ya las manda, úsalas; si no, deduce desde tickets)
   const statusOptions = useMemo(() => {
-    const fromApi = (filters as any)?.availableStatuses as string[] | undefined;
-    if (fromApi?.length) return fromApi;
+    const fromApi = catalogs?.availableStatuses;
+    if (fromApi?.length) return ['all', ...fromApi];
     const set = new Set<string>();
     tickets.forEach(t => t.status && set.add(String(t.status).trim()));
     return ['all', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [tickets, filters]);
+  }, [tickets, catalogs?.availableStatuses]);
 
   const urgencyOptions = useMemo(() => {
-    const fromApi = (filters as any)?.availableUrgencies as string[] | undefined;
-    if (fromApi?.length) return fromApi;
+    const fromApi = catalogs?.availableUrgencies;
+    if (fromApi?.length) return ['all', ...fromApi];
     const set = new Set<string>();
     tickets.forEach(t => t.urgencyLevel && set.add(String(t.urgencyLevel).trim()));
     return ['all', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [tickets, filters]);
+  }, [tickets, catalogs?.availableUrgencies]);
 
   // KPIs (sobre data ya filtrada por n8n)
   const kpis = useMemo(() => {
@@ -89,20 +98,50 @@ export default function SupportPage() {
     };
   }, [tickets, pagination?.totalItems]);
 
-  // Gráfico (sobre data ya filtrada por n8n)
+  // Gráfico volumen por fecha (ordenado)
   const chartData = useMemo(() => {
-    const ticketsByDate = tickets.reduce((acc, ticket) => {
-      const d = ticket.issueStarted ? new Date(ticket.issueStarted) : null;
-      const date = d && !isNaN(d.getTime()) ? d.toLocaleDateString() : 'N/A';
-      acc[date] = (acc[date] || 0) + 1;
+    const map = tickets.reduce((acc, t) => {
+      const d = t.issueStarted ? new Date(t.issueStarted) : null;
+      const key = d && !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : 'N/A'; // YYYY-MM-DD
+      acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
-
-    return Object.entries(ticketsByDate).map(([date, count]) => ({
-      date,
-      value: count,
-    }));
+    return Object.entries(map)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, value]) => ({ date, value }));
   }, [tickets]);
+
+  // SLA Attainment (goal vs actual) calculado desde tickets + política backend (o defaults)
+  const computedSlaData = useMemo(() => {
+    const policy = slaPolicy ?? SLA_DEFAULTS;
+
+    let frElig = 0, frMet = 0;
+    let resElig = 0, resMet = 0;
+
+    for (const t of tickets) {
+      // FIRST RESPONSE
+      const frMin = t.firstResponseMinutes ?? diffMinutes(t.firstResponseAt, t.issueStarted);
+      if (typeof frMin === 'number') {
+        frElig++;
+        if (frMin <= policy.targetFirstResponseMinutes) frMet++;
+      }
+
+      // RESOLUTION
+      const resMin = t.resolutionMinutes ?? diffMinutes(t.resolvedAt, t.issueStarted);
+      if (typeof resMin === 'number') {
+        resElig++;
+        if (resMin <= policy.targetResolutionMinutes) resMet++;
+      }
+    }
+
+    const frActual = frElig ? Math.round((frMet / frElig) * 100) : 0;
+    const resActual = resElig ? Math.round((resMet / resElig) * 100) : 0;
+
+    return [
+      { name: 'First Response', goal: policy.goalFirstResponsePercent, actual: frActual },
+      { name: 'Resolution',     goal: policy.goalResolutionPercent,    actual: resActual },
+    ];
+  }, [tickets, slaPolicy]);
 
   return (
     <ProtectedComponent permissionKey="page:support">
@@ -114,7 +153,7 @@ export default function SupportPage() {
           {/* Company → n8n */}
           <Select
             value={filters.company}
-            onValueChange={(value) => { updateFilters({ company: value }); goToPage(1); }}
+            onValueChange={(value) => { updateFilters({ company: value }); }}
           >
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Filter by Client..." />
@@ -156,8 +195,8 @@ export default function SupportPage() {
 
           {/* Status → n8n */}
           <Select
-            value={(filters as any)?.status ?? 'all'}
-            onValueChange={(v) => { updateFilters({ status: v }); goToPage(1); }}
+            value={filters.status}
+            onValueChange={(v) => { updateFilters({ status: v }); }}
           >
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by Status..." />
@@ -173,8 +212,8 @@ export default function SupportPage() {
 
           {/* Urgency → n8n */}
           <Select
-            value={(filters as any)?.urgency ?? 'all'}
-            onValueChange={(v) => { updateFilters({ urgency: v }); goToPage(1); }}
+            value={filters.urgency}
+            onValueChange={(v) => { updateFilters({ urgency: v }); }}
           >
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by Urgency..." />
@@ -187,8 +226,6 @@ export default function SupportPage() {
               ))}
             </SelectContent>
           </Select>
-
-         
         </div>
       </PageHeader>
 
@@ -235,7 +272,7 @@ export default function SupportPage() {
             </CardHeader>
             <CardContent>
               <ChartContainer config={{}} className="h-72">
-                <BarChart data={slaData} margin={{ top: 20 }}>
+                <BarChart data={computedSlaData} margin={{ top: 20 }}>
                   <CartesianGrid vertical={false} />
                   <XAxis dataKey="name" tickLine={false} axisLine={false} />
                   <YAxis tickFormatter={(v) => `${v}%`} />
