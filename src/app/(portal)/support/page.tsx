@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { PageHeader } from '@/components/page-header';
+import { TimeRangeFilter } from '@/components/time-range-filter';
 import { KpiCard } from '@/components/kpi-card';
 import { TicketsTable } from '@/components/tickets-table';
 import { useTickets } from '@/hooks/use-tickets';
@@ -20,100 +21,62 @@ const slaData = [
 ];
 
 export default function SupportPage() {
-  // Filtros que viajan al webhook (company, month)
+  // ➜ Filtros que viajan al webhook (company, month, status, urgency)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'custom'>('30d');
 
   const {
-    tickets,            // datos crudos del webhook (filtrados solo por company/month)
-    companies,
-    // pagination,      // paginación del backend (no usada en filtrado local)
+    tickets,            // datos del webhook (ya filtrados por n8n)
+    companies,          // [{value,label}] desde n8n
+    pagination,         // paginación del backend (n8n)
     loading,
     error,
-    filters,            // { month, company }
-    updateFilters,      // solo para company/month
+    filters,            // { month, company, status?, urgency?, availableStatuses?, availableUrgencies? }
+    updateFilters,
+    goToPage,
+    changePageSize,
   } = useTickets();
 
-  // Filtros locales (no viajan al webhook)
-  const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [urgencyFilter, setUrgencyFilter] = useState<string>('all');
-
-  // Paginación local
-  const [localPage, setLocalPage] = useState<number>(1);
-  const [localPageSize, setLocalPageSize] = useState<number>(10);
-
-  // Reset de página cuando cambian filtros
-  useEffect(() => {
-    setLocalPage(1);
-  }, [statusFilter, urgencyFilter, filters.company, filters.month]);
-
-  // Cambio de Month (DatePicker) → viaja al webhook
+  // Month (DatePicker) → viaja al webhook
   const handleDateChange = (date: Date | null) => {
     if (date) {
       setSelectedDate(date);
       const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       updateFilters({ month: monthYear });
+      goToPage(1);
     }
   };
 
   const handleClearDate = () => {
     setSelectedDate(null);
     updateFilters({ month: 'all' });
+    goToPage(1);
   };
 
-  // Opciones para combos locales
+  // Opciones para combos (si n8n ya las manda, úsales; si no, deduce desde tickets)
   const statusOptions = useMemo(() => {
+    const fromApi = (filters as any)?.availableStatuses as string[] | undefined;
+    if (fromApi?.length) return fromApi;
     const set = new Set<string>();
-    tickets.forEach(t => {
-      if (t.status) set.add(t.status.trim());
-    });
+    tickets.forEach(t => t.status && set.add(String(t.status).trim()));
     return ['all', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [tickets]);
+  }, [tickets, filters]);
 
   const urgencyOptions = useMemo(() => {
+    const fromApi = (filters as any)?.availableUrgencies as string[] | undefined;
+    if (fromApi?.length) return fromApi;
     const set = new Set<string>();
-    tickets.forEach(t => {
-      if (t.urgencyLevel) set.add(t.urgencyLevel.trim());
-    });
+    tickets.forEach(t => t.urgencyLevel && set.add(String(t.urgencyLevel).trim()));
     return ['all', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [tickets]);
+  }, [tickets, filters]);
 
-  // Filtrado local
-  const filteredTickets = useMemo(() => {
-    const s = statusFilter.toLowerCase();
-    const u = urgencyFilter.toLowerCase();
-
-    return tickets.filter(t => {
-      const statusOk = s === 'all' || (t.status ?? '').toLowerCase() === s;
-      const urgencyOk = u === 'all' || (t.urgencyLevel ?? '').toLowerCase() === u;
-      return statusOk && urgencyOk;
-    });
-  }, [tickets, statusFilter, urgencyFilter]);
-
-  // Paginación local sobre filtrados
-  const localTotalItems = filteredTickets.length;
-  const localTotalPages = Math.max(1, Math.ceil(localTotalItems / localPageSize));
-  const paginatedFilteredTickets = useMemo(() => {
-    const startIndex = (localPage - 1) * localPageSize;
-    const endIndex = startIndex + localPageSize;
-    return filteredTickets.slice(startIndex, endIndex);
-  }, [filteredTickets, localPage, localPageSize]);
-
-  const derivedPagination = {
-    currentPage: localPage,
-    pageSize: localPageSize,
-    totalItems: localTotalItems,
-    totalPages: localTotalPages,
-    hasNextPage: localPage < localTotalPages,
-    hasPreviousPage: localPage > 1,
-  };
-
-  // KPIs basados en tickets filtrados localmente
+  // KPIs (sobre data ya filtrada por n8n)
   const kpis = useMemo(() => {
-    const totalTickets = filteredTickets.length;
-    const resolvedTickets = filteredTickets.filter(
+    const totalTickets = pagination?.totalItems ?? tickets.length;
+    const resolvedTickets = tickets.filter(
       t => t.status?.toLowerCase() === 'resolved' || t.status?.toLowerCase() === 'closed'
     ).length;
-    const highPriorityTickets = filteredTickets.filter(
+    const highPriorityTickets = tickets.filter(
       t => t.urgencyLevel?.toLowerCase() === 'high' || t.urgencyLevel?.toLowerCase() === 'critical'
     ).length;
 
@@ -124,11 +87,11 @@ export default function SupportPage() {
       resolutionRate,
       highPriorityCount: highPriorityTickets,
     };
-  }, [filteredTickets]);
+  }, [tickets, pagination?.totalItems]);
 
-  // Datos para gráficos basados en tickets filtrados localmente
+  // Gráfico (sobre data ya filtrada por n8n)
   const chartData = useMemo(() => {
-    const ticketsByDate = filteredTickets.reduce((acc, ticket) => {
+    const ticketsByDate = tickets.reduce((acc, ticket) => {
       const d = ticket.issueStarted ? new Date(ticket.issueStarted) : null;
       const date = d && !isNaN(d.getTime()) ? d.toLocaleDateString() : 'N/A';
       acc[date] = (acc[date] || 0) + 1;
@@ -139,7 +102,7 @@ export default function SupportPage() {
       date,
       value: count,
     }));
-  }, [filteredTickets]);
+  }, [tickets]);
 
   return (
     <ProtectedComponent permissionKey="page:support">
@@ -148,10 +111,10 @@ export default function SupportPage() {
         description="Track ticket volume, SLA performance, and customer satisfaction."
       >
         <div className="flex flex-wrap items-center gap-2">
-          {/* Company → viaja al webhook */}
+          {/* Company → n8n */}
           <Select
             value={filters.company}
-            onValueChange={(value) => updateFilters({ company: value })}
+            onValueChange={(value) => { updateFilters({ company: value }); goToPage(1); }}
           >
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder="Filter by Client..." />
@@ -165,7 +128,7 @@ export default function SupportPage() {
             </SelectContent>
           </Select>
 
-          {/* Month (DatePicker) → viaja al webhook */}
+          {/* Month (DatePicker) → n8n */}
           <div className="flex items-center gap-2">
             <div className="relative">
               <DatePicker
@@ -191,8 +154,11 @@ export default function SupportPage() {
             )}
           </div>
 
-          {/* Status (local) */}
-          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v)}>
+          {/* Status → n8n */}
+          <Select
+            value={(filters as any)?.status ?? 'all'}
+            onValueChange={(v) => { updateFilters({ status: v }); goToPage(1); }}
+          >
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by Status..." />
             </SelectTrigger>
@@ -205,8 +171,11 @@ export default function SupportPage() {
             </SelectContent>
           </Select>
 
-          {/* Urgency (local) */}
-          <Select value={urgencyFilter} onValueChange={(v) => setUrgencyFilter(v)}>
+          {/* Urgency → n8n */}
+          <Select
+            value={(filters as any)?.urgency ?? 'all'}
+            onValueChange={(v) => { updateFilters({ urgency: v }); goToPage(1); }}
+          >
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by Urgency..." />
             </SelectTrigger>
@@ -218,6 +187,9 @@ export default function SupportPage() {
               ))}
             </SelectContent>
           </Select>
+
+          {/* Time range (como antes) — solo UI local si lo usabas para algo visual */}
+          <TimeRangeFilter value={timeRange} onChange={setTimeRange} />
         </div>
       </PageHeader>
 
@@ -277,16 +249,13 @@ export default function SupportPage() {
           </Card>
         </div>
 
-        {/* Tabla de tickets (filtrados y paginados localmente) */}
+        {/* Tabla con paginación del backend */}
         <TicketsTable
-          tickets={paginatedFilteredTickets}
+          tickets={tickets}
           loading={loading}
-          pagination={derivedPagination}
-          onPageChange={setLocalPage}
-          onPageSizeChange={(size: number) => {
-            setLocalPageSize(size);
-            setLocalPage(1);
-          }}
+          pagination={pagination}
+          onPageChange={goToPage}
+          onPageSizeChange={changePageSize}
         />
       </div>
     </ProtectedComponent>
