@@ -169,55 +169,51 @@ export default function SupportPage() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <ProtectedComponent permissionKey="widget:ticket_volume">
-            <Card>
-              <CardHeader>
-                <CardTitle>Ticket Volume by Date</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ChartContainer config={{}} className="h-72">
-                  <LineChart data={chartData}>
-                    <CartesianGrid vertical={false} />
-                    <XAxis 
-                      dataKey="date" 
-                      tickLine={false} 
-                      axisLine={false} 
-                      tickMargin={8}
-                    />
-                    <YAxis />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Line 
-                      type="monotone" 
-                      dataKey="value" 
-                      name="Tickets" 
-                      stroke="var(--color-chart-1)" 
-                      dot={false} 
-                    />
-                  </LineChart>
-                </ChartContainer>
-              </CardContent>
-            </Card>
-          </ProtectedComponent>
+          <Card>
+            <CardHeader>
+              <CardTitle>Ticket Volume by Date</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ChartContainer config={{}} className="h-72">
+                <LineChart data={chartData}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis 
+                    dataKey="date" 
+                    tickLine={false} 
+                    axisLine={false} 
+                    tickMargin={8}
+                  />
+                  <YAxis />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Line 
+                    type="monotone" 
+                    dataKey="value" 
+                    name="Tickets" 
+                    stroke="var(--color-chart-1)" 
+                    dot={false} 
+                  />
+                </LineChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
 
-          <ProtectedComponent permissionKey="widget:sla_attainment">
-            <Card>
-              <CardHeader>
-                <CardTitle>SLA Attainment</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <ChartContainer config={{}} className="h-72">
-                  <BarChart data={slaData} margin={{ top: 20 }}>
-                    <CartesianGrid vertical={false} />
-                    <XAxis dataKey="name" tickLine={false} axisLine={false} />
-                    <YAxis tickFormatter={(v) => `${v}%`} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <Bar dataKey="goal" fill="hsl(var(--muted))" radius={4} name="Goal" />
-                    <Bar dataKey="actual" fill="var(--color-chart-1)" radius={4} name="Actual" />
-                  </BarChart>
-                </ChartContainer>
-              </CardContent>
-            </Card>
-          </ProtectedComponent>
+          <Card>
+            <CardHeader>
+              <CardTitle>SLA Attainment</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ChartContainer config={{}} className="h-72">
+                <BarChart data={slaData} margin={{ top: 20 }}>
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="name" tickLine={false} axisLine={false} />
+                  <YAxis tickFormatter={(v) => `${v}%`} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Bar dataKey="goal" fill="hsl(var(--muted))" radius={4} name="Goal" />
+                  <Bar dataKey="actual" fill="var(--color-chart-1)" radius={4} name="Actual" />
+                </BarChart>
+              </ChartContainer>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Tabla de tickets */}
