@@ -30,9 +30,8 @@ const DEFAULT_PAGINATION: Pagination = {
 };
 
 export interface FeedbackFilters {
-  company: string;    // 'all' | nombre
-  dateFrom?: string;  // YYYY-MM-DD
-  dateTo?: string;    // YYYY-MM-DD
+  company: string; // 'all' | nombre exacto
+  month: string;   // 'all' | 'YYYY-MM'
   page: number;
   pageSize: number;
 }
@@ -46,6 +45,7 @@ export const useFeedback = () => {
 
   const [filters, setFilters] = useState<FeedbackFilters>({
     company: 'all',
+    month: 'all',
     page: 1,
     pageSize: 10,
   });
@@ -67,12 +67,11 @@ export const useFeedback = () => {
     })();
   }, []);
 
-  // QS desde filtros
+  // QS desde filtros: company + month + paginación
   const qs = useMemo(() => {
     const p = new URLSearchParams();
     if (filters.company !== 'all') p.set('company', filters.company);
-    if (filters.dateFrom) p.set('dateFrom', filters.dateFrom);
-    if (filters.dateTo) p.set('dateTo', filters.dateTo);
+    if (filters.month !== 'all')   p.set('month', filters.month);
     p.set('page', String(filters.page));
     p.set('pageSize', String(filters.pageSize));
     return p.toString();
@@ -81,7 +80,7 @@ export const useFeedback = () => {
   const lastQsRef = useRef('');
   const inFlightRef = useRef(false);
 
-  // fetch feedback
+  // fetch feedback cuando cambia qs
   useEffect(() => {
     if (qs === lastQsRef.current && inFlightRef.current) return;
     const controller = new AbortController();
@@ -122,10 +121,16 @@ export const useFeedback = () => {
       const next = { ...prev, ...patch };
       const baseChanged =
         (patch.company !== undefined && patch.company !== prev.company) ||
-        (patch.dateFrom !== undefined && patch.dateFrom !== prev.dateFrom) ||
-        (patch.dateTo !== undefined && patch.dateTo !== prev.dateTo) ||
+        (patch.month   !== undefined && patch.month   !== prev.month)   ||
         (patch.pageSize !== undefined && patch.pageSize !== prev.pageSize);
       if (baseChanged) next.page = 1;
+      // evita set si nada cambió
+      if (
+        next.company === prev.company &&
+        next.month   === prev.month &&
+        next.page    === prev.page &&
+        next.pageSize === prev.pageSize
+      ) return prev;
       return next;
     });
   }, []);
@@ -135,7 +140,9 @@ export const useFeedback = () => {
   }, []);
 
   const changePageSize = useCallback((pageSize: number) => {
-    setFilters(prev => (prev.pageSize === pageSize ? prev : { ...prev, pageSize, page: 1 }));
+    setFilters(prev =>
+      prev.pageSize === pageSize ? prev : { ...prev, pageSize, page: 1 },
+    );
   }, []);
 
   return { items, companies, pagination, loading, error, filters, updateFilters, goToPage, changePageSize };

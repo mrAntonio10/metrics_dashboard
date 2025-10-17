@@ -4,35 +4,46 @@
 import { useMemo, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { ProtectedComponent } from '@/hooks/use-permission';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 
-import { useFeedback } from '@/hooks/use-feedbacks';
+import { useFeedback } from '@/hooks/use-feedbacks'; // <-- singular
 import { FeedbackTable } from '@/components/feedback-table';
 
 export default function FeedbackPage() {
   const {
-    items, companies, pagination, loading, error,
-    filters, updateFilters, goToPage, changePageSize,
+    items,
+    companies,
+    pagination,
+    loading,
+    error,
+    filters,            // { company, month, page, pageSize }
+    updateFilters,
+    goToPage,
+    changePageSize,
   } = useFeedback();
 
-  // date pickers locales
-  const [from, setFrom] = useState<Date | null>(null);
-  const [to, setTo] = useState<Date | null>(null);
+  // Month (DatePicker) → viaja al webhook como 'YYYY-MM'
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
-  // helpers
-  const fmt = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : undefined); // YYYY-MM-DD
-
-  const applyDates = () => {
-    updateFilters({ dateFrom: fmt(from), dateTo: fmt(to) });
+  const handleDateChange = (date: Date | null) => {
+    if (!date) return;
+    setSelectedDate(date);
+    const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    updateFilters({ month: monthYear }); // el hook resetea page
   };
 
-  const clearDates = () => {
-    setFrom(null);
-    setTo(null);
-    updateFilters({ dateFrom: undefined, dateTo: undefined });
+  const handleClearDate = () => {
+    setSelectedDate(null);
+    updateFilters({ month: 'all' }); // el hook resetea page
   };
 
   const companyOptions = useMemo(() => companies, [companies]);
@@ -41,10 +52,10 @@ export default function FeedbackPage() {
     <ProtectedComponent permissionKey="page:feedback">
       <PageHeader
         title="Customer Feedback"
-        description="Browse customer opinions by client and date."
+        description="Browse customer opinions by client and month."
       >
         <div className="flex flex-wrap items-center gap-2">
-          {/* Company */}
+          {/* Company → n8n */}
           <Select
             value={filters.company}
             onValueChange={(v) => updateFilters({ company: v })}
@@ -54,28 +65,36 @@ export default function FeedbackPage() {
             </SelectTrigger>
             <SelectContent>
               {companyOptions.map((c) => (
-                <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                <SelectItem key={c.value} value={c.value}>
+                  {c.label}
+                </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          {/* Date range */}
+          {/* Month (DatePicker) → n8n */}
           <div className="flex items-center gap-2">
-            <DatePicker
-              selected={from}
-              onChange={(d) => setFrom(d)}
-              placeholderText="From (YYYY-MM-DD)"
-              className="w-[150px] px-3 py-2 text-sm border border-input bg-background rounded-md"
-            />
-            <DatePicker
-              selected={to}
-              onChange={(d) => setTo(d)}
-              placeholderText="To (YYYY-MM-DD)"
-              className="w-[150px] px-3 py-2 text-sm border border-input bg-background rounded-md"
-            />
-            <Button variant="default" size="sm" onClick={applyDates}>Apply</Button>
-            {(filters.dateFrom || filters.dateTo) && (
-              <Button variant="outline" size="sm" onClick={clearDates}>Clear</Button>
+            <div className="relative">
+              <DatePicker
+                selected={selectedDate}
+                onChange={handleDateChange}
+                dateFormat="MM/yyyy"
+                showMonthYearPicker
+                placeholderText="Select Month/Year"
+                className="w-[140px] px-3 py-2 text-sm border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                wrapperClassName="w-full"
+                calendarClassName="!font-sans"
+              />
+            </div>
+            {filters.month !== 'all' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClearDate}
+                className="px-2"
+              >
+                All Months
+              </Button>
             )}
           </div>
         </div>
