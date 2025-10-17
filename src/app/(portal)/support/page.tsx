@@ -188,8 +188,7 @@ export default function SupportPage() {
             </SelectContent>
           </Select>
 
-          {/* Time range (como antes) — solo UI local si lo usabas para algo visual */}
-          <TimeRangeFilter value={timeRange} onChange={setTimeRange} />
+         
         </div>
       </PageHeader>
 
