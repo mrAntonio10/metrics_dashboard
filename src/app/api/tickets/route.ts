@@ -1,0 +1,41 @@
+// src/app/api/tickets/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+
+const N8N_BASE_URL = 'https://n8n.uqminds.org/webhook';
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const month = searchParams.get('month');
+    const company = searchParams.get('company');
+    const page = searchParams.get('page') || '1';
+    const pageSize = searchParams.get('pageSize') || '10';
+
+    // Construir URL con parámetros
+    const params = new URLSearchParams();
+    if (month) params.append('month', month);
+    if (company) params.append('company', company);
+    params.append('page', page);
+    params.append('pageSize', pageSize);
+
+    const response = await fetch(`${N8N_BASE_URL}/tickets/list?${params.toString()}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Error fetching tickets: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return NextResponse.json(data);
+  } catch (error: any) {
+    console.error('Error in tickets API:', error);
+    return NextResponse.json(
+      { success: false, error: error.message },
+      { status: 500 }
+    );
+  }
+}
