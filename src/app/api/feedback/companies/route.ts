@@ -1,20 +1,26 @@
-// src/app/api/feedback/companies/route.ts
 import { NextResponse } from 'next/server';
 
-const N8N_BASE_URL = 'https://n8n.uqminds.org/webhook/feedback/companies';
+const N8N_BASE = 'https://n8n.uqminds.org/webhook';
 
 export async function GET() {
   try {
-    const res = await fetch(`${N8N_BASE_URL}/feedback/companies`, {
+    const upstream = `${N8N_BASE}/feedback/companies`;
+    const res = await fetch(upstream, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',
     });
-    if (!res.ok) throw new Error(`Error fetching feedback companies: ${res.statusText}`);
-    const data = await res.json();
-    return NextResponse.json(data);
+
+    // Para ver el error real si falla:
+    const text = await res.text();
+    if (!res.ok) {
+      console.error('Upstream /feedback/companies failed:', res.status, text);
+      return new NextResponse(text || 'Upstream error', { status: res.status });
+    }
+
+    return new NextResponse(text, { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error: any) {
     console.error('Error in feedback companies API:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: String(error?.message || error) }, { status: 500 });
   }
 }
