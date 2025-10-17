@@ -69,14 +69,8 @@ export const useTickets = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Helper para obtener mes actual
-  const getCurrentMonth = () => {
-    const currentDate = new Date();
-    return `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-  };
-
   const [filters, setFilters] = useState<TicketFilters>({
-    month: getCurrentMonth(), // Inicia con el mes actual
+    month: 'all', // Cambiado: empezar con 'all' para mostrar todos
     company: 'all',
     page: 1,
     pageSize: 10,
@@ -119,8 +113,14 @@ export const useTickets = () => {
       params.append('page', filters.page.toString());
       params.append('pageSize', filters.pageSize.toString());
 
-      const response = await fetch(`/api/tickets?${params.toString()}`);
+      const url = `/api/tickets?${params.toString()}`;
+      console.log('🔍 Enviando request:', url); // Debug
+      console.log('📊 Filtros actuales:', filters); // Debug
+
+      const response = await fetch(url);
       const data: TicketsResponse = await response.json();
+
+      console.log('📥 Respuesta recibida:', data); // Debug
 
       if (data.success) {
         setTickets(data.data.tickets);

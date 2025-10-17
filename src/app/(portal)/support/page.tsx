@@ -29,7 +29,7 @@ const getCurrentMonth = () => {
 
 export default function SupportPage() {
   const [timeRange, setTimeRange] = useState<'7d' | '30d' | '90d' | 'custom'>('30d');
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null); // Cambiado: empezar con null
   
   const {
     tickets,
@@ -48,12 +48,15 @@ export default function SupportPage() {
     if (date) {
       setSelectedDate(date);
       const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      console.log('DatePicker enviando filtro:', monthYear); // Debug
       updateFilters({ month: monthYear });
     }
   };
 
   // Reset a "All Months"
   const handleClearDate = () => {
+    setSelectedDate(null);
+    console.log('Limpiando filtro de fecha'); // Debug
     updateFilters({ month: 'all' });
   };
 
@@ -117,7 +120,7 @@ export default function SupportPage() {
           <div className="flex items-center gap-2">
             <div className="relative">
               <DatePicker
-                selected={filters.month !== 'all' ? selectedDate : null}
+                selected={selectedDate}
                 onChange={handleDateChange}
                 dateFormat="MM/yyyy"
                 showMonthYearPicker
