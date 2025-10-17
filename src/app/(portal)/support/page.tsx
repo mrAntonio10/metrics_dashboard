@@ -25,7 +25,7 @@ const ticketTypes = [
   { value: 'technical', label: 'Technical Support' },
 ];
 
-// Helper para generar opciones de mes
+// Helper para generar opciones de mes con mes actual por defecto
 const generateMonthOptions = () => {
   const options = [{ value: 'all', label: 'All Months' }];
   const currentDate = new Date();
@@ -38,6 +38,12 @@ const generateMonthOptions = () => {
   }
   
   return options;
+};
+
+// Helper para obtener el mes actual
+const getCurrentMonth = () => {
+  const currentDate = new Date();
+  return `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
 };
 
 export default function SupportPage() {

@@ -69,9 +69,15 @@ export const useTickets = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Helper para obtener mes actual
+  const getCurrentMonth = () => {
+    const currentDate = new Date();
+    return `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+  };
+
   const [filters, setFilters] = useState<TicketFilters>({
-    month: '',
-    company: '',
+    month: getCurrentMonth(), // Inicia con el mes actual
+    company: 'all',
     page: 1,
     pageSize: 10,
   });
@@ -93,7 +99,7 @@ export const useTickets = () => {
       
       if (data.success) {
         setCompanies([
-          { value: '', label: 'All Clients' },
+          { value: 'all', label: 'All Clients' },
           ...data.data.companies
         ]);
       }
@@ -108,8 +114,8 @@ export const useTickets = () => {
 
     try {
       const params = new URLSearchParams();
-      if (filters.month) params.append('month', filters.month);
-      if (filters.company) params.append('company', filters.company);
+      if (filters.month && filters.month !== 'all') params.append('month', filters.month);
+      if (filters.company && filters.company !== 'all') params.append('company', filters.company);
       params.append('page', filters.page.toString());
       params.append('pageSize', filters.pageSize.toString());
 
