@@ -6,7 +6,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/components/ui/dialog'
@@ -23,6 +22,7 @@ type BillingConfig = {
   chatsEnabled: boolean
   chatsPrice: number
   managementDate?: string
+  invoiceEmail?: string           // ⬅️ NUEVO
 }
 
 export default function TenantBillingCard({
@@ -34,12 +34,15 @@ export default function TenantBillingCard({
   const [cfg, setCfg] = useState<BillingConfig | null>(null)
   const [open, setOpen] = useState(false)
 
-  // campos del diálogo
-  const [price, setPrice] = useState<string>('') // permite entero o decimal como texto
+  // precio
+  const [price, setPrice] = useState<string>('') 
   const numPrice = Number(price)
   const priceValid = !Number.isNaN(numPrice) && numPrice >= 0
 
-  // cargar config
+  // email
+  const [invoiceEmail, setInvoiceEmail] = useState<string>('') 
+  const emailValid = !invoiceEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(invoiceEmail)
+
   const reloadConfig = async () => {
     const res = await fetch('/api/billing/config', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -48,6 +51,7 @@ export default function TenantBillingCard({
     const data: BillingConfig = await res.json()
     setCfg(data)
     setPrice(String(data.userPrice ?? ''))
+    setInvoiceEmail(String(data.invoiceEmail ?? ''))
   }
 
   useEffect(() => { reloadConfig() }, [tenant.tenantId])
@@ -59,18 +63,19 @@ export default function TenantBillingCard({
   const estimatedTotal = tenant.users * effectiveRate
 
   const handleSave = async () => {
-    if (!priceValid) return
-    await fetch('/api/billing/update-price', {
+    if (!priceValid || !emailValid) return
+    await fetch('/api/billing/update-config', {           // ⬅️ NUEVO endpoint
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         tenantId: tenant.tenantId,
-        newUserPrice: numPrice,   // ⬅️ crea o actualiza USER_PRICE
+        newUserPrice: numPrice,            // crea/actualiza USER_PRICE
+        invoiceEmail: invoiceEmail || null // crea/actualiza EMAIL_FOR_INVOICE (o borra si null)
       }),
     })
     await reloadConfig()
     setOpen(false)
-    onAdjust?.(tenant.tenantId) // opcional: notifica al padre
+    onAdjust?.(tenant.tenantId)
   }
 
   return (
@@ -106,15 +111,15 @@ export default function TenantBillingCard({
 
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="w-full mt-2">Adjust Price Param</Button>
+            <Button size="sm" className="w-full mt-2">Adjust Billing Params</Button>
           </DialogTrigger>
 
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Adjust USER_PRICE</DialogTitle>
+              <DialogTitle>Billing Params</DialogTitle>
             </DialogHeader>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="space-y-1.5">
                 <Label htmlFor="user-price">USER_PRICE (USD)</Label>
                 <Input
@@ -131,14 +136,29 @@ export default function TenantBillingCard({
                   <p className="text-xs text-destructive">Enter a valid non-negative number.</p>
                 )}
               </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="invoice-email">EMAIL_FOR_INVOICE</Label>
+                <Input
+                  id="invoice-email"
+                  type="email"
+                  value={invoiceEmail}
+                  onChange={(e) => setInvoiceEmail(e.target.value)}
+                  placeholder="billing@empresa.com"
+                />
+                {!emailValid && (
+                  <p className="text-xs text-destructive">Enter a valid email.</p>
+                )}
+              </div>
+
               <p className="text-xs text-muted-foreground">
-                Se creará la clave <code>USER_PRICE</code> si no existe. El portal enviará la notificación sólo si el ambiente está activo.
+                Se guardan <code>USER_PRICE</code> y <code>EMAIL_FOR_INVOICE</code> en las envs del tenant.
               </p>
             </div>
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-              <Button onClick={handleSave} disabled={!priceValid}>Save</Button>
+              <Button onClick={handleSave} disabled={!priceValid || !emailValid}>Save</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

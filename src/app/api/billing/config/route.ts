@@ -1,3 +1,4 @@
+// src/app/api/billing/config/route.ts
 import fs from 'fs/promises'
 import path from 'path'
 
@@ -5,18 +6,27 @@ const TENANTS_DIR = '/root/mr/vivace-api'
 
 type BillingConfig = {
   tenantId: string
-  userPrice: number      // USER_PRICE
-  chatsEnabled: boolean  // CHATS_ENABLED (opcional)
-  chatsPrice: number     // CHATS_PRICE (opcional)
+  userPrice: number
+  chatsEnabled: boolean
+  chatsPrice: number
   managementStatus?: string
-  managementDate?: string // YYYY-MM-DD (aniversario de renovación)
+  managementDate?: string
+  invoiceEmail?: string
 }
 
 function parseEnv(content: string) {
   const map: Record<string, string> = {}
-  for (const line of content.split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/)
-    if (m) map[m[1]] = m[2]
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const m = line.match(/^([A-Z0-9_]+)\s*=\s*(.*)$/)
+    if (!m) continue
+    let val = m[2].trim()
+    // quita comillas si vienen "..."
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1)
+    }
+    map[m[1]] = val
   }
   return map
 }
@@ -34,14 +44,18 @@ export async function POST(req: Request) {
     const cfg: BillingConfig = {
       tenantId,
       userPrice: Number(env.USER_PRICE ?? 15),
-      chatsEnabled: (env.CHATS_ENABLED ?? 'true').toLowerCase() === 'true',
-      chatsPrice: Number(env.CHATS_PRICE ?? 0), // si quieres que “Chats” esté incluido en USER_PRICE, deja 0 aquí
-      managementStatus: env.MANAGEMENT_STATUS,
-      managementDate: env.MANAGEMENT_DATE, // día de aniversario (YYYY-MM-DD)
+      chatsEnabled: (env.CHATS_ENABLED ?? 'false').toLowerCase() === 'true',
+      chatsPrice: Number(env.CHATS_PRICE ?? 0),
+      managementStatus: env.MANAGEMENT_STATUS || undefined,
+      managementDate: env.MANAGEMENT_DATE || undefined,
+      invoiceEmail: env.EMAIL_FOR_INVOICE || '',
     }
 
-    return new Response(JSON.stringify(cfg), { status: 200, headers: { 'Content-Type': 'application/json' } })
-  } catch (e:any) {
+    return new Response(JSON.stringify(cfg), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  } catch (e: any) {
     return new Response(`Internal Error: ${e.message}`, { status: 500 })
   }
 }
