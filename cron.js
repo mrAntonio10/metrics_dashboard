@@ -20,7 +20,6 @@ async function getPool() {
 
 // -------- helpers de fecha en zona horaria fija (America/La_Paz) --------
 function localParts(tz, d = new Date()) {
-  // obtiene y, m, d "locales" en la zona tz
   const f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
   const [y, m, dd] = f.format(d).split('-').map(Number);
   return { y, m, d: dd };
@@ -31,14 +30,13 @@ function localYmd(tz, d = new Date()) {
 }
 function isLastDayOfMonthLocal(tz, d = new Date()) {
   const { y, m, d: dd } = localParts(tz, d);
-  const daysInMonth = new Date(y, m, 0).getDate(); // usa calendario gregoriano, maneja bisiestos
+  const daysInMonth = new Date(y, m, 0).getDate(); // maneja bisiestos
   return dd === daysInMonth;
 }
 function isBeforeLocalDate(tz, compareYmd, d = new Date()) {
   if (!compareYmd) return false;
   const { y, m, d: dd } = localParts(tz, d);
   const [cy, cm, cd] = compareYmd.split('-').map(Number);
-  // true si hoy_local < compareYmd
   if (y !== cy) return y < cy;
   if (m !== cm) return m < cm;
   return dd < cd;
@@ -109,14 +107,14 @@ async function runBilling() {
   });
 }
 
-// Programa el cron **a la hora local de La Paz** (p.ej., 09:00 La Paz todos los días).
-// ahora (9 pm)
-cron.schedule('0 21 * * *', runBilling, { timezone: 'America/La_Paz' });
-
+// Programa el cron a las **21:00** hora de La Paz, todos los días.
+cron.schedule('0 21 * * *', () => {
   runBilling().catch(err => console.error('[billing-cron] Error:', err.message));
 }, { timezone: TZ });
 
-console.log(`[billing-cron] Scheduler activo (09:00 ${TZ} daily).`);
+console.log(`[billing-cron] Scheduler activo (21:00 ${TZ} daily).`);
 
 process.on('SIGTERM', async () => { try { await pool?.end(); } finally { process.exit(0); } });
 process.on('SIGINT',  async () => { try { await pool?.end(); } finally { process.exit(0); } });
+
+export {};
