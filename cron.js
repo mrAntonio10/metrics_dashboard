@@ -1,11 +1,11 @@
-// cron.js (Miami == Bolivia UTC-4 fijo usando America/La_Paz)
-import cron from 'node-cron';
-import mysql from 'mysql2/promise';
+// cron.js  (CommonJS)
+const cron = require('node-cron');
+const mysql = require('mysql2/promise');
 
-const TZ = 'America/La_Paz'; // UTC-4 sin DST
-const BILLING_WEBHOOK   = process.env.BILLING_WEBHOOK || 'https://n8n.uqminds.org/webhook/d005f867-3f6f-415e-8068-57d6b22b691a';
+const TZ = 'America/La_Paz';
+const BILLING_WEBHOOK   = process.env.BILLING_WEBHOOK   || 'https://n8n.uqminds.org/webhook/d005f867-3f6f-415e-8068-57d6b22b691a';
 const MANAGEMENT_STATUS = process.env.MANAGEMENT_STATUS || 'TRIAL';
-const MANAGEMENT_DATE   = process.env.MANAGEMENT_DATE   || '';        // 'YYYY-MM-DD' interpretado en America/La_Paz
+const MANAGEMENT_DATE   = process.env.MANAGEMENT_DATE   || '';
 const COMPANY_NAME      = process.env.COMPANY_NAME      || 'Acme Inc.';
 const COMPANY_KEY       = process.env.COMPANY_KEY       || 'default';
 const DB_URL            = process.env.DATABASE_URL;
@@ -18,7 +18,7 @@ async function getPool() {
   return pool;
 }
 
-// -------- helpers de fecha en zona horaria fija (America/La_Paz) --------
+// Helpers de fecha (zona America/La_Paz)
 function localParts(tz, d = new Date()) {
   const f = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
   const [y, m, dd] = f.format(d).split('-').map(Number);
@@ -30,7 +30,7 @@ function localYmd(tz, d = new Date()) {
 }
 function isLastDayOfMonthLocal(tz, d = new Date()) {
   const { y, m, d: dd } = localParts(tz, d);
-  const daysInMonth = new Date(y, m, 0).getDate(); // maneja bisiestos
+  const daysInMonth = new Date(y, m, 0).getDate();
   return dd === daysInMonth;
 }
 function isBeforeLocalDate(tz, compareYmd, d = new Date()) {
@@ -42,7 +42,7 @@ function isBeforeLocalDate(tz, compareYmd, d = new Date()) {
   return dd < cd;
 }
 
-// ---------------- DB snapshot ----------------
+// DB snapshot
 async function getBillingSnapshot(companyKey) {
   const pool = await getPool();
   const conn = await pool.getConnection();
@@ -62,7 +62,7 @@ async function getBillingSnapshot(companyKey) {
   } finally { conn.release(); }
 }
 
-// ---------------- POST al webhook ----------------
+// POST al webhook (usa fetch y FormData del runtime de Node 20)
 async function postInvoice({ description, quantity, rate, total, companyName, detail }) {
   const form = new FormData();
   form.set('DESCRIPTION', description);
@@ -78,9 +78,8 @@ async function postInvoice({ description, quantity, rate, total, companyName, de
   if (!resp.ok) throw new Error(`Webhook respondió ${resp.status}`);
 }
 
-// ---------------- job principal ----------------
+// Job principal
 async function runBilling() {
-  // Todo basado en hora local de La Paz (UTC-4 fijo)
   if (MANAGEMENT_DATE && isBeforeLocalDate(TZ, MANAGEMENT_DATE)) {
     console.log('[billing-cron] Antes de MANAGEMENT_DATE (hora La Paz), skip.');
     return;
@@ -107,7 +106,7 @@ async function runBilling() {
   });
 }
 
-// Programa el cron a las **21:00** hora de La Paz, todos los días.
+// Cron 21:00 America/La_Paz
 cron.schedule('0 21 * * *', () => {
   runBilling().catch(err => console.error('[billing-cron] Error:', err.message));
 }, { timezone: TZ });
@@ -116,5 +115,3 @@ console.log(`[billing-cron] Scheduler activo (21:00 ${TZ} daily).`);
 
 process.on('SIGTERM', async () => { try { await pool?.end(); } finally { process.exit(0); } });
 process.on('SIGINT',  async () => { try { await pool?.end(); } finally { process.exit(0); } });
-
-export {};

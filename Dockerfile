@@ -10,9 +10,10 @@ COPY .next/standalone ./
 COPY .next/static ./.next/static
 COPY .next/BUILD_ID ./.next/BUILD_ID
 
-# Copia los archivos del cron/arranque
-COPY cron.mjs ./cron.mjs
+# Copia cron y el bootstrap
+COPY cron.js ./cron.js
 COPY start.mjs ./start.mjs
 
 EXPOSE 9002
 CMD ["node","start.mjs"]
+
