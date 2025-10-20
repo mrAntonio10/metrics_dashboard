@@ -27,7 +27,7 @@ export default function ClientBillingPage({
   const search = useSearchParams()
   const [isPending, startTransition] = useTransition()
 
-  // ====== cliente ======
+  // cliente -> ?client=
   const handleSelectClient = (val: string) => {
     startTransition(() => {
       const params = new URLSearchParams(search.toString())
@@ -37,32 +37,21 @@ export default function ClientBillingPage({
     })
   }
 
+  // nombre legible para COMPANY
   const selectedCompanyName = useMemo(() => {
     if (selectedClient === 'all') return ''
     return counts.find(c => c.tenantId === selectedClient)?.tenantName || ''
   }, [counts, selectedClient])
 
+  // cards
   const filtered = useMemo(
     () => (selectedClient === 'all' ? counts : counts.filter(c => c.tenantId === selectedClient)),
     [counts, selectedClient]
   )
 
-  // ====== filtros/paginado invoices ======
-  type DateMode = 'month' | 'day'
-  const [dateMode, setDateMode] = useState<DateMode>('month')
-  const [monthYear, setMonthYear] = useState<string>('')   // 'YYYY-MM'
-  const [day, setDay] = useState<string>('all')            // 'all' | '1'..'31'
-
-  // construye el parámetro `date` para N8N:
-  // - 'YYYY-MM' si hay mes pero día = 'all'
-  // - 'YYYY-MM-DD' si hay día específico
-  const dateParam = useMemo(() => {
-    if (!monthYear) return ''
-    if (dateMode === 'day' && day !== 'all') {
-      return `${monthYear}-${String(day).padStart(2, '0')}`
-    }
-    return monthYear // filtro por mes
-  }, [dateMode, monthYear, day])
+  // ====== fecha exacta ======
+  // '' => sin filtrar; 'YYYY-MM-DD' => filtrar ese día
+  const [selectedDate, setSelectedDate] = useState<string>('')
 
   const [invItems, setInvItems] = useState<InvoiceLine[]>([])
   const [loading, setLoading] = useState(false)
@@ -77,7 +66,7 @@ export default function ClientBillingPage({
     hasNextPage: false,
   })
 
-  // ====== fetch invoices ======
+  // fetch invoices
   useEffect(() => {
     const abort = new AbortController()
     const load = async () => {
@@ -85,8 +74,8 @@ export default function ClientBillingPage({
       setErrorMsg(null)
       try {
         const params = new URLSearchParams()
-        if (selectedCompanyName) params.set('company', selectedCompanyName) // NO doble-encode
-        if (dateParam) params.set('date', dateParam)
+        if (selectedCompanyName) params.set('company', selectedCompanyName)
+        if (selectedDate) params.set('date', selectedDate)    // YYYY-MM-DD directo
         params.set('page', String(invPagination.currentPage))
         params.set('pageSize', String(invPagination.pageSize))
 
@@ -124,7 +113,7 @@ export default function ClientBillingPage({
     }
     load()
     return () => abort.abort()
-  }, [selectedCompanyName, dateParam, invPagination.currentPage, invPagination.pageSize])
+  }, [selectedCompanyName, selectedDate, invPagination.currentPage, invPagination.pageSize])
 
   const onPageChange = (p: number) => {
     setInvPagination(prev => ({
@@ -149,23 +138,9 @@ export default function ClientBillingPage({
           orgs={orgs}
           selectedClient={selectedClient}
           onSelect={handleSelectClient}
-          dateMode={dateMode}
-          monthYear={monthYear}
-          day={day}
-          onDateModeChange={(m) => { setDateMode(m); setDay('all'); setInvPagination(s => ({ ...s, currentPage: 1 })) }}
-          onMonthChange={(ym) => {
-            setMonthYear(ym)
-            if (day !== 'all') {
-              const [y, m] = ym.split('-').map(Number)
-              if (Number(day) > new Date(y, m, 0).getDate()) setDay('all')
-            }
-            setInvPagination(s => ({ ...s, currentPage: 1 }))
-          }}
-          onDayChange={(d) => { setDay(d); setInvPagination(s => ({ ...s, currentPage: 1 })) }}
-          onClearFilters={() => {
-            setDateMode('month'); setMonthYear(''); setDay('all')
-            setInvPagination(s => ({ ...s, currentPage: 1 }))
-          }}
+          selectedDate={selectedDate}
+          onDateChange={(d) => { setSelectedDate(d); setInvPagination(s => ({ ...s, currentPage: 1 })) }}
+          onClearFilters={() => { setSelectedDate(''); setInvPagination(s => ({ ...s, currentPage: 1 })) }}
         />
       </PageHeader>
 
