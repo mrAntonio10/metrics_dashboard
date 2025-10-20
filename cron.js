@@ -110,7 +110,9 @@ async function runBilling() {
 }
 
 // Programa el cron **a la hora local de La Paz** (p.ej., 09:00 La Paz todos los días).
-cron.schedule('0 9 * * *', () => {
+// ahora (9 pm)
+cron.schedule('0 21 * * *', runBilling, { timezone: 'America/La_Paz' });
+
   runBilling().catch(err => console.error('[billing-cron] Error:', err.message));
 }, { timezone: TZ });
 
