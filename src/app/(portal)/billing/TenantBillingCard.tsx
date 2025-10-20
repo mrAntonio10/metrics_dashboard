@@ -36,8 +36,6 @@ export default function TenantBillingCard({
 
   // campos del diálogo
   const [price, setPrice] = useState<string>('') // permite entero o decimal como texto
-  const [notifyAdmin, setNotifyAdmin] = useState<boolean>(true)
-  const [notifyTenant, setNotifyTenant] = useState<boolean>(false)
   const numPrice = Number(price)
   const priceValid = !Number.isNaN(numPrice) && numPrice >= 0
 
@@ -68,8 +66,6 @@ export default function TenantBillingCard({
       body: JSON.stringify({
         tenantId: tenant.tenantId,
         newUserPrice: numPrice,   // ⬅️ crea o actualiza USER_PRICE
-        notifyAdmin,
-        notifyTenant,
       }),
     })
     await reloadConfig()
@@ -135,16 +131,6 @@ export default function TenantBillingCard({
                   <p className="text-xs text-destructive">Enter a valid non-negative number.</p>
                 )}
               </div>
-
-              <div className="flex items-center gap-2">
-                <Checkbox id="notify-admin" checked={notifyAdmin} onCheckedChange={(v) => setNotifyAdmin(Boolean(v))} />
-                <Label htmlFor="notify-admin">Notify environment admin by email</Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <Checkbox id="notify-tenant" checked={notifyTenant} onCheckedChange={(v) => setNotifyTenant(Boolean(v))} />
-                <Label htmlFor="notify-tenant">Notify tenant billing contact</Label>
-              </div>
-
               <p className="text-xs text-muted-foreground">
                 Se creará la clave <code>USER_PRICE</code> si no existe. El portal enviará la notificación sólo si el ambiente está activo.
               </p>
