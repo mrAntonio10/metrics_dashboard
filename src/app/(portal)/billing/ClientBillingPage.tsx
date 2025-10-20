@@ -17,7 +17,7 @@ export type CountRow = {
 
 const N8N_INVOICES_ENDPOINT =
   process.env.NEXT_PUBLIC_BILLING_API ||
-  'https://n8n.uqminds.org/webhook-test/invoices/list';
+  'https://n8n.uqminds.org/webhook/invoices/list';
 
 export default function ClientBillingPage({
   orgs, counts, selectedClient,
