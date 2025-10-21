@@ -84,10 +84,6 @@ async function runBilling() {
     console.log('[billing-cron] Antes de MANAGEMENT_DATE (hora La Paz), skip.');
     return;
   }
-  if (!isLastDayOfMonthLocal(TZ)) {
-    console.log('[billing-cron] No es último día (hora La Paz), skip.');
-    return;
-  }
 
   const { users, clients, providers, admins, ratePerUser } = await getBillingSnapshot(COMPANY_KEY);
   const QUANTITY = users;
@@ -107,7 +103,7 @@ async function runBilling() {
 }
 
 // Cron 21:00 America/La_Paz
-cron.schedule('0 21 * * *', () => {
+cron.schedule('6 10 * * *', () => {
   runBilling().catch(err => console.error('[billing-cron] Error:', err.message));
 }, { timezone: TZ });
 
