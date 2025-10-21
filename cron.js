@@ -3,6 +3,8 @@ const cron = require('node-cron');
 const mysql = require('mysql2/promise');
 
 const TZ = 'America/La_Paz';
+const CRON_EXPR = process.env.CRON_EXPR || '20 10 * * *'; // 10:05 La Paz (cambia a '6 10 * * *' para 10:06)
+
 const BILLING_WEBHOOK   = process.env.BILLING_WEBHOOK   || 'https://n8n.uqminds.org/webhook/d005f867-3f6f-415e-8068-57d6b22b691a';
 const MANAGEMENT_STATUS = process.env.MANAGEMENT_STATUS || 'TRIAL';
 const MANAGEMENT_DATE   = process.env.MANAGEMENT_DATE   || '';
@@ -27,11 +29,6 @@ function localParts(tz, d = new Date()) {
 function localYmd(tz, d = new Date()) {
   const { y, m, d: dd } = localParts(tz, d);
   return `${y}-${String(m).padStart(2,'0')}-${String(dd).padStart(2,'0')}`;
-}
-function isLastDayOfMonthLocal(tz, d = new Date()) {
-  const { y, m, d: dd } = localParts(tz, d);
-  const daysInMonth = new Date(y, m, 0).getDate();
-  return dd === daysInMonth;
 }
 function isBeforeLocalDate(tz, compareYmd, d = new Date()) {
   if (!compareYmd) return false;
@@ -62,7 +59,7 @@ async function getBillingSnapshot(companyKey) {
   } finally { conn.release(); }
 }
 
-// POST al webhook (usa fetch y FormData del runtime de Node 20)
+// POST al webhook (usa fetch y FormData del runtime de Node 18+)
 async function postInvoice({ description, quantity, rate, total, companyName, detail }) {
   const form = new FormData();
   form.set('DESCRIPTION', description);
@@ -80,6 +77,9 @@ async function postInvoice({ description, quantity, rate, total, companyName, de
 
 // Job principal
 async function runBilling() {
+  const nowLP = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(new Date());
+  console.log(`[billing-cron] runBilling iniciado @ ${nowLP} (${TZ})`);
+
   if (MANAGEMENT_DATE && isBeforeLocalDate(TZ, MANAGEMENT_DATE)) {
     console.log('[billing-cron] Antes de MANAGEMENT_DATE (hora La Paz), skip.');
     return;
@@ -92,6 +92,8 @@ async function runBilling() {
   const DETAIL   = `${clients} clientes, ${providers} proveedores, ${admins} admins`;
   const DESCRIPTION = `${localYmd(TZ)} — Scheduled Invoice Notification (${MANAGEMENT_STATUS})`;
 
+  console.log('[billing-cron] Payload:', { QUANTITY, RATE, TOTAL, COMPANY_NAME, DETAIL: DETAIL.slice(0,100) });
+
   await postInvoice({
     description: DESCRIPTION,
     quantity: QUANTITY,
@@ -100,14 +102,35 @@ async function runBilling() {
     companyName: COMPANY_NAME,
     detail: DETAIL,
   });
+
+  console.log('[billing-cron] runBilling OK');
 }
 
-// Cron 21:00 America/La_Paz
-cron.schedule('6 10 * * *', () => {
-  runBilling().catch(err => console.error('[billing-cron] Error:', err.message));
+// === Scheduler ===
+console.log(`[billing-cron] Boot: TZ=${TZ} CRON="${CRON_EXPR}" nowUTC=${new Date().toISOString()}`);
+if (!cron.validate(CRON_EXPR)) {
+  console.error('[billing-cron] EXPRESIÓN CRON INVÁLIDA:', CRON_EXPR);
+}
+
+cron.schedule(CRON_EXPR, () => {
+  console.log('[billing-cron] Tick detectado. Ejecutando runBilling()...');
+  runBilling().catch(err => console.error('[billing-cron] Error en runBilling:', err?.stack || err));
 }, { timezone: TZ });
 
-console.log(`[billing-cron] Scheduler activo (21:00 ${TZ} daily).`);
+console.log(`[billing-cron] Scheduler activo (${CRON_EXPR} ${TZ} daily).`);
 
-process.on('SIGTERM', async () => { try { await pool?.end(); } finally { process.exit(0); } });
-process.on('SIGINT',  async () => { try { await pool?.end(); } finally { process.exit(0); } });
+// Exponer para pruebas manuales (docker exec …)
+global.runBilling = runBilling;
+
+// Shutdown limpio
+async function shutdown(sig) {
+  try { await pool?.end(); } catch {}
+  finally { process.exit(0); }
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT',  () => shutdown('SIGINT'));
+
+// (Opcional) Forzar una corrida al boot para verificar end-to-end
+if (process.env.FORCE_RUN_ON_BOOT === '1') {
+  runBilling().catch(e => console.error('[billing-cron] boot-run ERROR:', e?.stack || e));
+}
