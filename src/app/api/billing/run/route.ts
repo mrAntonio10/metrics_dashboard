@@ -4,6 +4,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
 import mysql, { RowDataPacket, Pool, Connection } from 'mysql2/promise'
+import puppeteer from 'puppeteer' // <— for HTML -> PDF/PNG
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -11,24 +12,23 @@ export const dynamic = 'force-dynamic'
 /* =========================
    Config
    ========================= */
-const BILLING_RUN_SECRET = (process.env.BILLING_RUN_SECRET || '').trim()
 const BILLING_WEBHOOK =
   (process.env.BILLING_WEBHOOK || '').trim() ||
   'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d'
 
 const TENANTS_DIR = process.env.TENANTS_DIR || '/data/vivace-vivace-api'
 const ENV_PREFIX = '.env.'
-const DB_URL = (process.env.DATABASE_URL || '').trim() // opcional: fallback de tarifa
+const DB_URL = (process.env.DATABASE_URL || '').trim() // optional: global rate fallback
 const TZ = 'America/La_Paz'
 
-// Estrategia de cantidad: SUM | USERS | USERS_OR_SUM (default: SUM)
+// Quantity strategy: SUM | USERS | USERS_OR_SUM (default: SUM)
 const BILLING_QUANTITY_STRATEGY = (process.env.BILLING_QUANTITY_STRATEGY || 'SUM').toUpperCase() as
   | 'SUM'
   | 'USERS'
   | 'USERS_OR_SUM'
 
 /* =========================
-   Fecha (La Paz)
+   Date helpers (La Paz)
    ========================= */
 function todayLocalParts(d = new Date()) {
   const f = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -53,7 +53,7 @@ function cmpYMD(a: { y: number; m: number; d: number }, b: { y: number; m: numbe
   if (a.m !== b.m) return a.m - b.m
   return a.d - b.d
 }
-/** due hoy si (1) hay anchor, (2) hoy >= anchor, (3) día = min(anchor.d, fin de mes) */
+/** Due today if (1) anchor exists, (2) today >= anchor, (3) day = min(anchor.d, end of month) */
 function dueTodayMonthly(anchorYmd?: string) {
   const anchor = parseYMD(anchorYmd)
   if (!anchor) return false
@@ -66,9 +66,7 @@ function dueTodayMonthly(anchorYmd?: string) {
 /* =========================
    .env.* helpers
    ========================= */
-function trim(s: string) {
-  return s.replace(/^\s+|\s+$/g, '')
-}
+function trim(s: string) { return s.replace(/^\s+|\s+$/g, '') }
 function parseDotenv(text: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const raw of text.split(/\r?\n/)) {
@@ -98,14 +96,11 @@ async function listEnvFiles(dir: string) {
 }
 function normalizeEmails(s: string | undefined | null): string[] {
   if (!s) return []
-  return s
-    .split(/[;,]/)
-    .map((x) => x.trim())
-    .filter(Boolean)
+  return s.split(/[;,]/).map((x) => x.trim()).filter(Boolean)
 }
 
 /* =========================
-   Tipos
+   Types
    ========================= */
 type Tenant = {
   tenantId: string
@@ -117,7 +112,9 @@ type Tenant = {
   db: { host: string; port: number; database: string; user: string; password: string }
   tables: { users: string; clients: string; providers: string }
   ratePerUser?: number
-  invoiceEmails: string[] // emails de facturación
+  invoiceEmails: string[]
+  appName: string
+  currency: string
 }
 type Counts = { users: number; clients: number; providers: number; admins: number }
 type Result =
@@ -125,10 +122,10 @@ type Result =
   | { tenantId: string; status: number; ok: false; error: string }
 
 /* =========================
-   Lectura de .env.{tenant}
+   Read .env.{tenant}
    ========================= */
 async function readTenantEnv(file: string): Promise<Tenant> {
-  const base = path.basename(file) // .env.client1
+  const base = path.basename(file)
   const tenantId = base.slice(ENV_PREFIX.length)
   const env = parseDotenv(await fs.readFile(file, 'utf8'))
 
@@ -146,32 +143,27 @@ async function readTenantEnv(file: string): Promise<Tenant> {
   const clientsTable = env['CLIENTS_TABLE'] || 'clients'
   const providersTable = env['PROVIDERS_TABLE'] || 'providers'
 
-  // Acepta RATE_PER_USER o USER_PRICE
   const ratePerUser =
     env['RATE_PER_USER'] ? Number(env['RATE_PER_USER']) : env['USER_PRICE'] ? Number(env['USER_PRICE']) : undefined
 
-  // Email(s) para facturas (admite , o ;)
   const invoiceEmails =
     normalizeEmails(env['EMAIL_FOR_INVOICE']) ||
     normalizeEmails(env['INVOICE_EMAIL']) ||
     normalizeEmails(env['BILLING_EMAIL'])
 
+  const appName = env['APP_NAME'] || companyName
+  const currency = (env['CURRENCY'] || 'BOB').toUpperCase()
+
   return {
-    tenantId,
-    companyKey,
-    companyName,
-    managementStatus,
-    managementDate,
-    envFile: file,
+    tenantId, companyKey, companyName, managementStatus, managementDate, envFile: file,
     db: { host: host || '', port, database: database || '', user: user || '', password: password || '' },
     tables: { users: usersTable, clients: clientsTable, providers: providersTable },
-    ratePerUser,
-    invoiceEmails,
+    ratePerUser, invoiceEmails, appName, currency,
   }
 }
 
 /* =========================
-   DB helpers por tenant
+   DB helpers per tenant
    ========================= */
 function isSoftDbError(e: any) {
   const code = String(e?.code || '')
@@ -184,19 +176,11 @@ function isSoftDbError(e: any) {
 
 async function getCountsPerTenant(t: Tenant): Promise<Counts> {
   let conn: Connection | null = null
-  let users = 0,
-    clients = 0,
-    providers = 0,
-    admins = 0
+  let users = 0, clients = 0, providers = 0, admins = 0
   try {
     if (!t.db.host || !t.db.database || !t.db.user) throw new Error('tenant-db-missing-params')
     conn = await mysql.createConnection({
-      host: t.db.host,
-      port: t.db.port,
-      database: t.db.database,
-      user: t.db.user,
-      password: t.db.password,
-      connectTimeout: 6000,
+      host: t.db.host, port: t.db.port, database: t.db.database, user: t.db.user, password: t.db.password, connectTimeout: 6000,
     })
 
     const [cRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${t.tables.clients}\``)
@@ -208,31 +192,23 @@ async function getCountsPerTenant(t: Tenant): Promise<Counts> {
       ;(pRows as any[]).forEach((r) => map.set(String(r.type).toLowerCase(), Number(r.c)))
       admins = map.get('admin') || 0
       providers = map.get('provider') || 0
-    } catch {
-      // si no hay tabla/columna, dejamos 0/0
-    }
+    } catch {}
 
     try {
       const [uRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${t.tables.users}\``)
       users = Number((uRows as any)[0]?.c || 0)
     } catch {
-      // fallback si no existe tabla de users
       users = clients + admins + providers
     }
     return { users, clients, providers, admins }
   } finally {
-    try {
-      await conn?.end()
-    } catch {}
+    try { await conn?.end() } catch {}
   }
 }
 
 let planPool: Pool | null = null
 async function getRatePerUser(t: Tenant): Promise<number> {
-  // 1) Preferir la tarifa definida en el .env del tenant
   if (typeof t.ratePerUser === 'number' && !Number.isNaN(t.ratePerUser)) return Number(t.ratePerUser)
-
-  // 2) Fallback opcional contra DB global (si está bien configurada)
   if (!DB_URL || /@host[:/]/i.test(DB_URL)) return 0
   try {
     if (!planPool) planPool = await mysql.createPool(DB_URL)
@@ -247,7 +223,135 @@ async function getRatePerUser(t: Tenant): Promise<number> {
 }
 
 /* =========================
-   POST a n8n
+   Invoice HTML (email-safe)
+   ========================= */
+function esc(s: any) {
+  const str = String(s ?? '')
+  return str.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
+}
+function fmtMoney(v: number, currency = 'BOB', locale = 'es-BO') {
+  try { return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(v) }
+  catch { return `${currency} ${Number(v || 0).toFixed(2)}` }
+}
+function fmtNumber(v: number, locale = 'es-BO') {
+  try { return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(v) }
+  catch { return String(v) }
+}
+function renderInvoiceHTML(opts: {
+  appName: string
+  description: string
+  quantity: number
+  rate: number
+  total: number
+  companyName: string
+  detail: string
+  currency: string
+  issuedAt: string
+}) {
+  const { appName, description, quantity, rate, total, companyName, detail, currency, issuedAt } = opts
+  const qtyStr = fmtNumber(quantity)
+  const rateStr = fmtMoney(rate, currency)
+  const totalStr = fmtMoney(total, currency)
+  return `<!doctype html>
+<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Invoice</title>
+<style>
+body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#111;background:#fff}
+.wrap{max-width:720px;margin:0 auto;padding:24px}
+.card{border:1px solid #e5e7eb;border-radius:16px;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,0.04)}
+.hdr{padding:28px;border-bottom:1px solid #f1f5f9;text-align:center}
+h1{margin:0;font-size:28px;line-height:1.2}
+.desc{margin:8px 0 0 0;color:#334155;font-size:16px}
+.sub{margin:6px 0 0 0;color:#64748b;font-size:12px}
+.cnt{padding:24px}
+table{width:100%;border-collapse:separate;border-spacing:0}
+thead th{background:#f8fafc;color:#64748b;text-transform:uppercase;font-size:12px;letter-spacing:.04em;text-align:left;padding:10px}
+tbody td{border-top:1px solid #f1f5f9;padding:12px;color:#111;font-size:14px;vertical-align:top}
+.total{font-weight:600}
+.stripe{margin-top:16px;background:#f8fafc;border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center}
+.stripe .l{color:#475569;font-size:13px}
+.stripe .r{font-weight:700}
+.foot{margin-top:12px;color:#64748b;font-size:12px}
+@media (max-width: 640px){
+  .wrap{padding:16px}.hdr{padding:20px}h1{font-size:22px}.desc{font-size:15px}
+  thead{display:none}table,tbody,tr,td{display:block;width:100%}tbody td{border-top:0;padding:8px 0}tbody td+td{border-top:1px solid #f1f5f9}
+}
+</style></head>
+<body>
+<div class="wrap"><div class="card">
+  <div class="hdr">
+    <h1>${esc(appName)}</h1>
+    <p class="desc">${esc(description)}</p>
+    <p class="sub">Issued on ${esc(issuedAt)}</p>
+  </div>
+  <div class="cnt">
+    <table role="presentation" aria-hidden="true">
+      <thead><tr>
+        <th>Quantity</th><th>Rate</th><th>Total</th><th>Company Name</th><th>Detail</th>
+      </tr></thead>
+      <tbody><tr>
+        <td>${esc(qtyStr)}</td>
+        <td>${esc(rateStr)}</td>
+        <td class="total">${esc(totalStr)}</td>
+        <td>${esc(companyName)}</td>
+        <td>${esc(detail)}</td>
+      </tr></tbody>
+    </table>
+    <div class="stripe">
+      <div class="l"><strong>Subtotal</strong> • ${esc(qtyStr)} units × ${esc(rateStr)}</div>
+      <div class="r">${esc(totalStr)}</div>
+    </div>
+    <p class="foot">This summary shows the charge details for your system usage. If you have any questions, please reply to this email.</p>
+  </div>
+</div></div>
+</body></html>`
+}
+
+/* =========================
+   HTML -> PDF/PNG (Puppeteer)
+   ========================= */
+let browserPromise: Promise<puppeteer.Browser> | null = null
+async function getBrowser() {
+  if (!browserPromise) {
+    browserPromise = puppeteer.launch({
+      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      headless: 'new',
+    })
+  }
+  return browserPromise
+}
+async function htmlToPDF(html: string): Promise<Buffer> {
+  const browser = await getBrowser()
+  const page = await browser.newPage()
+  await page.setContent(html, { waitUntil: 'networkidle0' })
+  const buf = await page.pdf({ format: 'A4', printBackground: true })
+  await page.close()
+  return buf
+}
+async function htmlToPNG(html: string): Promise<Buffer> {
+  const browser = await getBrowser()
+  const page = await browser.newPage()
+  await page.setViewport({ width: 1000, height: 1400, deviceScaleFactor: 2 })
+  await page.setContent(html, { waitUntil: 'networkidle0' })
+  const buf = await page.screenshot({ type: 'png', fullPage: true })
+  await page.close()
+  return buf
+}
+
+/* =========================
+   Business helpers
+   ========================= */
+function computeQuantity(s: Counts) {
+  switch (BILLING_QUANTITY_STRATEGY) {
+    case 'USERS': return s.users
+    case 'USERS_OR_SUM': return s.users > 0 ? s.users : s.clients + s.providers + s.admins
+    case 'SUM':
+    default: return s.clients + s.providers + s.admins
+  }
+}
+
+/* =========================
+   POST handler
    ========================= */
 type N8nPayload = {
   DESCRIPTION: string
@@ -256,58 +360,32 @@ type N8nPayload = {
   TOTAL: number
   COMPANY_NAME: string
   DETAIL: string
+  CURRENCY?: string
   TO_EMAIL?: string
   recipients?: string[]
+  EMAIL_HTML?: string
+  FILE_BASE64?: string
+  FILE_NAME?: string
+  FILE_MIME?: string
 }
+
 async function postToN8N(payload: N8nPayload, tenantId: string, companyKey: string) {
   const ac = new AbortController()
   const to = setTimeout(() => ac.abort(), 15000)
   try {
     const resp = await fetch(BILLING_WEBHOOK, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-tenant-id': tenantId,
-        'x-company-key': companyKey,
-      },
+      headers: { 'content-type': 'application/json', 'x-tenant-id': tenantId, 'x-company-key': companyKey },
       body: JSON.stringify(payload),
       signal: ac.signal,
     })
     const text = await resp.text()
     return { ok: resp.ok, status: resp.status, text }
-  } finally {
-    clearTimeout(to)
-  }
+  } finally { clearTimeout(to) }
 }
 
-/* =========================
-   Helpers de negocio
-   ========================= */
-function computeQuantity(s: Counts) {
-  switch (BILLING_QUANTITY_STRATEGY) {
-    case 'USERS':
-      return s.users
-    case 'USERS_OR_SUM':
-      return s.users > 0 ? s.users : s.clients + s.providers + s.admins
-    case 'SUM':
-    default:
-      return s.clients + s.providers + s.admins
-  }
-}
-
-/* =========================
-   Handler
-   ========================= */
 export async function POST(req: NextRequest) {
   try {
-    // Auth opcional
-    if (BILLING_RUN_SECRET) {
-      const fromHeader = (req.headers.get('x-billing-secret') || '').trim()
-      const fromQuery = new URL(req.url).searchParams.get('secret')?.trim() || ''
-      if (fromHeader !== BILLING_RUN_SECRET && fromQuery !== BILLING_RUN_SECRET) {
-        return new Response('Unauthorized', { status: 401 })
-      }
-    }
 
     if (!BILLING_WEBHOOK) return new Response('Missing BILLING_WEBHOOK', { status: 500 })
 
@@ -315,11 +393,12 @@ export async function POST(req: NextRequest) {
     const onlyTenant = url.searchParams.get('tenant')?.trim()
     const force = url.searchParams.get('force') === '1'
     const sendZero = url.searchParams.get('sendZero') === '1'
+    const attach = (url.searchParams.get('attach') || 'pdf').toLowerCase() as 'pdf' | 'png' | 'none' // <-- default pdf
 
     const host = os.hostname()
     const todayStr = todayLocalYMDString()
 
-    // Descubre tenants
+    // Discover tenants
     let files = await listEnvFiles(TENANTS_DIR)
     if (onlyTenant) {
       const expected = `.env.${onlyTenant}`
@@ -331,18 +410,16 @@ export async function POST(req: NextRequest) {
     const results: Result[] = []
 
     for (const t of tenants) {
-      // (A) Solo procesar si tiene fecha (o si se fuerza)
       if (!t.managementDate && !force) {
         results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'no-management-date' })
         continue
       }
-      // (B) Solo el día que toca (o si se fuerza)
       if (!force && !dueTodayMonthly(t.managementDate)) {
         results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'not-due-today' })
         continue
       }
 
-      // (C) Snapshot DB del tenant (si falla, saltar suavemente)
+      // Snapshot
       let snap: Counts
       try {
         snap = await getCountsPerTenant(t)
@@ -352,7 +429,7 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      // (D) Tarifa y totales
+      // Rate and totals
       const RATE = await getRatePerUser(t)
       const QUANTITY = computeQuantity(snap)
       const TOTAL = Number((QUANTITY * RATE).toFixed(2))
@@ -366,9 +443,41 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      // (E) Enviar a n8n
+      // Build HTML
       const DESCRIPTION = `${todayStr} — Scheduled Invoice (${t.managementStatus || 'N/A'})`
       const DETAIL = `${snap.clients} clients, ${snap.providers} providers, ${snap.admins} admins — host=${host} envFile=${t.envFile}`
+
+      const EMAIL_HTML = renderInvoiceHTML({
+        appName: t.appName,
+        description: DESCRIPTION,
+        quantity: QUANTITY,
+        rate: RATE,
+        total: TOTAL,
+        companyName: t.companyName,
+        detail: DETAIL,
+        currency: t.currency,
+        issuedAt: todayStr,
+      })
+
+      // Build attachment on-the-fly (default PDF)
+      let FILE_BASE64: string | undefined
+      let FILE_NAME: string | undefined
+      let FILE_MIME: string | undefined
+      try {
+        if (attach === 'pdf') {
+          const buf = await htmlToPDF(EMAIL_HTML)
+          FILE_BASE64 = buf.toString('base64')
+          FILE_NAME = `invoice-${t.companyKey}-${todayStr}.pdf`
+          FILE_MIME = 'application/pdf'
+        } else if (attach === 'png') {
+          const buf = await htmlToPNG(EMAIL_HTML)
+          FILE_BASE64 = buf.toString('base64')
+          FILE_NAME = `invoice-${t.companyKey}-${todayStr}.png`
+          FILE_MIME = 'image/png'
+        }
+      } catch (e: any) {
+        // If rendering fails, still send the email body without attachment
+      }
 
       const toEmailStr = t.invoiceEmails.join(',') || ''
       const recipientsArr = t.invoiceEmails.length ? t.invoiceEmails : undefined
@@ -382,47 +491,29 @@ export async function POST(req: NextRequest) {
             TOTAL,
             COMPANY_NAME: t.companyName,
             DETAIL,
+            CURRENCY: t.currency,
             TO_EMAIL: toEmailStr || undefined,
             recipients: recipientsArr,
+            EMAIL_HTML,
+            FILE_BASE64,
+            FILE_NAME,
+            FILE_MIME,
           },
           t.tenantId,
           t.companyKey,
         )
         if (resp.ok) {
-          results.push({
-            tenantId: t.tenantId,
-            status: resp.status,
-            ok: true,
-            qty: QUANTITY,
-            rate: RATE,
-            total: TOTAL,
-            to: t.invoiceEmails,
-          })
+          results.push({ tenantId: t.tenantId, status: resp.status, ok: true, qty: QUANTITY, rate: RATE, total: TOTAL, to: t.invoiceEmails })
         } else {
-          results.push({
-            tenantId: t.tenantId,
-            status: resp.status,
-            ok: false,
-            error: resp.text || 'unknown',
-          })
+          results.push({ tenantId: t.tenantId, status: resp.status, ok: false, error: resp.text || 'unknown' })
         }
       } catch (e: any) {
         results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: `webhook-skip:${e?.message || 'unknown'}` })
       }
     }
 
-    // Siempre 200 (resumen por tenant + debug útil)
-    const payload = {
-      ok: true,
-      sent: results.length,
-      results,
-      webhookUsed: BILLING_WEBHOOK,
-      quantityStrategy: BILLING_QUANTITY_STRATEGY,
-    }
-    return new Response(JSON.stringify(payload, null, 2), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    })
+    const payload = { ok: true, sent: results.length, results, webhookUsed: BILLING_WEBHOOK, quantityStrategy: BILLING_QUANTITY_STRATEGY }
+    return new Response(JSON.stringify(payload, null, 2), { status: 200, headers: { 'content-type': 'application/json' } })
   } catch (e: any) {
     return new Response(`Internal Error: ${e.message}`, { status: 500 })
   }
