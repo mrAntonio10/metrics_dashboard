@@ -12,9 +12,7 @@ export const dynamic = 'force-dynamic'
 /* =========================
    Config
    ========================= */
-const BILLING_WEBHOOK =
-  (process.env.BILLING_WEBHOOK || '').trim() ||
-  'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d'
+const BILLING_WEBHOOK = 'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d'
 
 const TENANTS_DIR = process.env.TENANTS_DIR || '/data/vivace-vivace-api'
 const ENV_PREFIX = '.env.'
