@@ -12,9 +12,7 @@ export const dynamic = 'force-dynamic'
    Config
    ========================= */
 const BILLING_RUN_SECRET = (process.env.BILLING_RUN_SECRET || '').trim()
-const BILLING_WEBHOOK =
-  process.env.BILLING_WEBHOOK ||
-  'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d'
+const BILLING_WEBHOOK = 'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d'
 const TENANTS_DIR = process.env.TENANTS_DIR || '/data/vivace-vivace-api'
 const ENV_PREFIX = '.env.'
 const DB_URL = process.env.DATABASE_URL // opcional: fallback para tarifa global
