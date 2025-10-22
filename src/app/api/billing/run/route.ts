@@ -219,10 +219,7 @@ async function postToN8N(payload: N8nPayload, tenantId: string, companyKey: stri
 export async function POST(req: NextRequest) {
   try {
     // Auth opcional
-    if (BILLING_RUN_SECRET) {
-      const secret = req.headers.get('x-run-secret') || ''
-      if (secret !== BILLING_RUN_SECRET) return new Response('Unauthorized', { status: 401 })
-    }
+
     if (!BILLING_WEBHOOK) return new Response('Missing BILLING_WEBHOOK', { status: 500 })
 
     const url = new URL(req.url)
