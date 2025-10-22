@@ -12,11 +12,20 @@ export const dynamic = 'force-dynamic'
    Config
    ========================= */
 const BILLING_RUN_SECRET = (process.env.BILLING_RUN_SECRET || '').trim()
-const BILLING_WEBHOOK = 'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d'
+const BILLING_WEBHOOK =
+  (process.env.BILLING_WEBHOOK || '').trim() ||
+  'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d'
+
 const TENANTS_DIR = process.env.TENANTS_DIR || '/data/vivace-vivace-api'
 const ENV_PREFIX = '.env.'
-const DB_URL = process.env.DATABASE_URL // opcional: fallback para tarifa global
+const DB_URL = (process.env.DATABASE_URL || '').trim() // opcional: fallback de tarifa
 const TZ = 'America/La_Paz'
+
+// Estrategia de cantidad: SUM | USERS | USERS_OR_SUM (default: SUM)
+const BILLING_QUANTITY_STRATEGY = (process.env.BILLING_QUANTITY_STRATEGY || 'SUM').toUpperCase() as
+  | 'SUM'
+  | 'USERS'
+  | 'USERS_OR_SUM'
 
 /* =========================
    Fecha (La Paz)
@@ -36,14 +45,20 @@ function parseYMD(s?: string) {
   if (!m) return null
   return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) }
 }
-function lastDayOfMonth(y: number, m: number) { return new Date(Date.UTC(y, m, 0)).getUTCDate() }
-function cmpYMD(a:{y:number;m:number;d:number}, b:{y:number;m:number;d:number}) {
-  if (a.y !== b.y) return a.y - b.y; if (a.m !== b.m) return a.m - b.m; return a.d - b.d
+function lastDayOfMonth(y: number, m: number) {
+  return new Date(Date.UTC(y, m, 0)).getUTCDate()
+}
+function cmpYMD(a: { y: number; m: number; d: number }, b: { y: number; m: number; d: number }) {
+  if (a.y !== b.y) return a.y - b.y
+  if (a.m !== b.m) return a.m - b.m
+  return a.d - b.d
 }
 /** due hoy si (1) hay anchor, (2) hoy >= anchor, (3) día = min(anchor.d, fin de mes) */
 function dueTodayMonthly(anchorYmd?: string) {
-  const anchor = parseYMD(anchorYmd); if (!anchor) return false
-  const today = todayLocalParts(); if (cmpYMD(today, anchor) < 0) return false
+  const anchor = parseYMD(anchorYmd)
+  if (!anchor) return false
+  const today = todayLocalParts()
+  if (cmpYMD(today, anchor) < 0) return false
   const sched = Math.min(anchor.d, lastDayOfMonth(today.y, today.m))
   return today.d === sched
 }
@@ -51,14 +66,18 @@ function dueTodayMonthly(anchorYmd?: string) {
 /* =========================
    .env.* helpers
    ========================= */
-function trim(s: string) { return s.replace(/^\s+|\s+$/g, '') }
-function parseDotenv(text: string): Record<string,string> {
-  const out: Record<string,string> = {}
+function trim(s: string) {
+  return s.replace(/^\s+|\s+$/g, '')
+}
+function parseDotenv(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
   for (const raw of text.split(/\r?\n/)) {
-    const line = trim(raw); if (!line || line.startsWith('#')) continue
-    const i = line.indexOf('='); if (i < 0) continue
-    const key = trim(line.slice(0,i))
-    let val = line.slice(i+1).trim()
+    const line = trim(raw)
+    if (!line || line.startsWith('#')) continue
+    const i = line.indexOf('=')
+    if (i < 0) continue
+    const key = trim(line.slice(0, i))
+    let val = line.slice(i + 1).trim()
     if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1)
     }
@@ -70,12 +89,19 @@ async function listEnvFiles(dir: string) {
   try {
     const entries = await fs.readdir(dir, { withFileTypes: true })
     return entries
-      .filter(e => e.isFile() && e.name.startsWith(ENV_PREFIX) && e.name.length > ENV_PREFIX.length)
-      .map(e => path.join(dir, e.name))
-  } catch (e:any) {
+      .filter((e) => e.isFile() && e.name.startsWith(ENV_PREFIX) && e.name.length > ENV_PREFIX.length)
+      .map((e) => path.join(dir, e.name))
+  } catch (e: any) {
     if (e?.code === 'ENOENT') return []
     throw e
   }
+}
+function normalizeEmails(s: string | undefined | null): string[] {
+  if (!s) return []
+  return s
+    .split(/[;,]/)
+    .map((x) => x.trim())
+    .filter(Boolean)
 }
 
 /* =========================
@@ -88,13 +114,19 @@ type Tenant = {
   managementStatus: string
   managementDate: string
   envFile: string
-  db: { host:string; port:number; database:string; user:string; password:string }
+  db: { host: string; port: number; database: string; user: string; password: string }
   tables: { users: string; clients: string; providers: string }
   ratePerUser?: number
+  invoiceEmails: string[] // emails de facturación
 }
-type Counts = { users:number; clients:number; providers:number; admins:number }
-type Result = { tenantId:string; status:number; ok:boolean; reason?:string; error?:string }
+type Counts = { users: number; clients: number; providers: number; admins: number }
+type Result =
+  | { tenantId: string; status: number; ok: true; reason?: string; qty?: number; rate?: number; total?: number; to?: string[] }
+  | { tenantId: string; status: number; ok: false; error: string }
 
+/* =========================
+   Lectura de .env.{tenant}
+   ========================= */
 async function readTenantEnv(file: string): Promise<Tenant> {
   const base = path.basename(file) // .env.client1
   const tenantId = base.slice(ENV_PREFIX.length)
@@ -105,22 +137,36 @@ async function readTenantEnv(file: string): Promise<Tenant> {
   const managementStatus = (env['MANAGEMENT_STATUS'] || '').toUpperCase()
   const managementDate = env['MANAGEMENT_DATE'] || ''
 
-  const host = env['DB_HOST']; const port = Number(env['DB_PORT'] || 3306)
-  const database = env['DB_DATABASE']; const user = env['DB_USERNAME']; const password = env['DB_PASSWORD']
+  const host = env['DB_HOST']
+  const port = Number(env['DB_PORT'] || 3306)
+  const database = env['DB_DATABASE']
+  const user = env['DB_USERNAME']
+  const password = env['DB_PASSWORD']
   const usersTable = env['USERS_TABLE'] || 'users'
   const clientsTable = env['CLIENTS_TABLE'] || 'clients'
   const providersTable = env['PROVIDERS_TABLE'] || 'providers'
 
   // Acepta RATE_PER_USER o USER_PRICE
   const ratePerUser =
-    env['RATE_PER_USER'] ? Number(env['RATE_PER_USER'])
-    : (env['USER_PRICE'] ? Number(env['USER_PRICE']) : undefined)
+    env['RATE_PER_USER'] ? Number(env['RATE_PER_USER']) : env['USER_PRICE'] ? Number(env['USER_PRICE']) : undefined
+
+  // Email(s) para facturas (admite , o ;)
+  const invoiceEmails =
+    normalizeEmails(env['EMAIL_FOR_INVOICE']) ||
+    normalizeEmails(env['INVOICE_EMAIL']) ||
+    normalizeEmails(env['BILLING_EMAIL'])
 
   return {
-    tenantId, companyKey, companyName, managementStatus, managementDate, envFile: file,
+    tenantId,
+    companyKey,
+    companyName,
+    managementStatus,
+    managementDate,
+    envFile: file,
     db: { host: host || '', port, database: database || '', user: user || '', password: password || '' },
     tables: { users: usersTable, clients: clientsTable, providers: providersTable },
-    ratePerUser
+    ratePerUser,
+    invoiceEmails,
   }
 }
 
@@ -138,12 +184,19 @@ function isSoftDbError(e: any) {
 
 async function getCountsPerTenant(t: Tenant): Promise<Counts> {
   let conn: Connection | null = null
-  let users = 0, clients = 0, providers = 0, admins = 0
+  let users = 0,
+    clients = 0,
+    providers = 0,
+    admins = 0
   try {
     if (!t.db.host || !t.db.database || !t.db.user) throw new Error('tenant-db-missing-params')
     conn = await mysql.createConnection({
-      host: t.db.host, port: t.db.port, database: t.db.database, user: t.db.user, password: t.db.password,
-      connectTimeout: 6000
+      host: t.db.host,
+      port: t.db.port,
+      database: t.db.database,
+      user: t.db.user,
+      password: t.db.password,
+      connectTimeout: 6000,
     })
 
     const [cRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${t.tables.clients}\``)
@@ -152,20 +205,25 @@ async function getCountsPerTenant(t: Tenant): Promise<Counts> {
     try {
       const [pRows] = await conn.query(`SELECT type, COUNT(*) AS c FROM \`${t.tables.providers}\` GROUP BY type`)
       const map = new Map<string, number>()
-      ;(pRows as any[]).forEach(r => map.set(String(r.type), Number(r.c)))
+      ;(pRows as any[]).forEach((r) => map.set(String(r.type).toLowerCase(), Number(r.c)))
       admins = map.get('admin') || 0
       providers = map.get('provider') || 0
-    } catch {}
+    } catch {
+      // si no hay tabla/columna, dejamos 0/0
+    }
 
     try {
       const [uRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${t.tables.users}\``)
       users = Number((uRows as any)[0]?.c || 0)
     } catch {
+      // fallback si no existe tabla de users
       users = clients + admins + providers
     }
     return { users, clients, providers, admins }
   } finally {
-    try { await conn?.end() } catch {}
+    try {
+      await conn?.end()
+    } catch {}
   }
 }
 
@@ -191,7 +249,16 @@ async function getRatePerUser(t: Tenant): Promise<number> {
 /* =========================
    POST a n8n
    ========================= */
-type N8nPayload = { DESCRIPTION:string; QUANTITY:number; RATE:number; TOTAL:number; COMPANY_NAME:string; DETAIL:string }
+type N8nPayload = {
+  DESCRIPTION: string
+  QUANTITY: number
+  RATE: number
+  TOTAL: number
+  COMPANY_NAME: string
+  DETAIL: string
+  TO_EMAIL?: string
+  recipients?: string[]
+}
 async function postToN8N(payload: N8nPayload, tenantId: string, companyKey: string) {
   const ac = new AbortController()
   const to = setTimeout(() => ac.abort(), 15000)
@@ -208,7 +275,24 @@ async function postToN8N(payload: N8nPayload, tenantId: string, companyKey: stri
     })
     const text = await resp.text()
     return { ok: resp.ok, status: resp.status, text }
-  } finally { clearTimeout(to) }
+  } finally {
+    clearTimeout(to)
+  }
+}
+
+/* =========================
+   Helpers de negocio
+   ========================= */
+function computeQuantity(s: Counts) {
+  switch (BILLING_QUANTITY_STRATEGY) {
+    case 'USERS':
+      return s.users
+    case 'USERS_OR_SUM':
+      return s.users > 0 ? s.users : s.clients + s.providers + s.admins
+    case 'SUM':
+    default:
+      return s.clients + s.providers + s.admins
+  }
 }
 
 /* =========================
@@ -217,6 +301,13 @@ async function postToN8N(payload: N8nPayload, tenantId: string, companyKey: stri
 export async function POST(req: NextRequest) {
   try {
     // Auth opcional
+    if (BILLING_RUN_SECRET) {
+      const fromHeader = (req.headers.get('x-billing-secret') || '').trim()
+      const fromQuery = new URL(req.url).searchParams.get('secret')?.trim() || ''
+      if (fromHeader !== BILLING_RUN_SECRET && fromQuery !== BILLING_RUN_SECRET) {
+        return new Response('Unauthorized', { status: 401 })
+      }
+    }
 
     if (!BILLING_WEBHOOK) return new Response('Missing BILLING_WEBHOOK', { status: 500 })
 
@@ -255,7 +346,7 @@ export async function POST(req: NextRequest) {
       let snap: Counts
       try {
         snap = await getCountsPerTenant(t)
-      } catch (e:any) {
+      } catch (e: any) {
         const tag = isSoftDbError(e) ? `db-skip:${e?.code || e?.message || 'unknown'}` : `skip:${e?.message || 'unknown'}`
         results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: tag })
         continue
@@ -263,7 +354,7 @@ export async function POST(req: NextRequest) {
 
       // (D) Tarifa y totales
       const RATE = await getRatePerUser(t)
-      const QUANTITY = snap.users
+      const QUANTITY = computeQuantity(snap)
       const TOTAL = Number((QUANTITY * RATE).toFixed(2))
 
       if (!sendZero && (Number.isNaN(RATE) || RATE <= 0)) {
@@ -279,28 +370,60 @@ export async function POST(req: NextRequest) {
       const DESCRIPTION = `${todayStr} — Scheduled Invoice (${t.managementStatus || 'N/A'})`
       const DETAIL = `${snap.clients} clients, ${snap.providers} providers, ${snap.admins} admins — host=${host} envFile=${t.envFile}`
 
+      const toEmailStr = t.invoiceEmails.join(',') || ''
+      const recipientsArr = t.invoiceEmails.length ? t.invoiceEmails : undefined
+
       try {
         const resp = await postToN8N(
-          { DESCRIPTION, QUANTITY, RATE, TOTAL, COMPANY_NAME: t.companyName, DETAIL },
-          t.tenantId, t.companyKey
+          {
+            DESCRIPTION,
+            QUANTITY,
+            RATE,
+            TOTAL,
+            COMPANY_NAME: t.companyName,
+            DETAIL,
+            TO_EMAIL: toEmailStr || undefined,
+            recipients: recipientsArr,
+          },
+          t.tenantId,
+          t.companyKey,
         )
-        results.push({
-          tenantId: t.tenantId,
-          status: resp.status,
-          ok: resp.ok,
-          error: resp.ok ? undefined : resp.text || 'unknown',
-        })
-      } catch (e:any) {
+        if (resp.ok) {
+          results.push({
+            tenantId: t.tenantId,
+            status: resp.status,
+            ok: true,
+            qty: QUANTITY,
+            rate: RATE,
+            total: TOTAL,
+            to: t.invoiceEmails,
+          })
+        } else {
+          results.push({
+            tenantId: t.tenantId,
+            status: resp.status,
+            ok: false,
+            error: resp.text || 'unknown',
+          })
+        }
+      } catch (e: any) {
         results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: `webhook-skip:${e?.message || 'unknown'}` })
       }
     }
 
-    // Siempre 200 (resumen de qué pasó por tenant)
-    const payload = { ok: true, sent: results.length, results }
+    // Siempre 200 (resumen por tenant + debug útil)
+    const payload = {
+      ok: true,
+      sent: results.length,
+      results,
+      webhookUsed: BILLING_WEBHOOK,
+      quantityStrategy: BILLING_QUANTITY_STRATEGY,
+    }
     return new Response(JSON.stringify(payload, null, 2), {
-      status: 200, headers: { 'content-type': 'application/json' },
+      status: 200,
+      headers: { 'content-type': 'application/json' },
     })
-  } catch (e:any) {
+  } catch (e: any) {
     return new Response(`Internal Error: ${e.message}`, { status: 500 })
   }
 }
