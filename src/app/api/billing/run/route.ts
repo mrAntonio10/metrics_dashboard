@@ -83,10 +83,7 @@ function parseDotenv(text: string): Record<string, string> {
     if (i < 0) continue;
     const key = trim(line.slice(0, i));
     let val = line.slice(i + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
     out[key] = val;
@@ -130,6 +127,35 @@ type Tenant = {
   currency: string;
 };
 type Counts = { users: number; clients: number; providers: number; admins: number };
+
+type AttachDebug = {
+  wanted: 'pdf' | 'png' | 'none';
+  tried: boolean;
+  ok: boolean;
+  bytes?: number;
+  name?: string;
+  mime?: string;
+  error?: string;
+  fallback?: 'html';
+};
+
+type N8nPayload = {
+  DESCRIPTION: string;
+  QUANTITY: number;
+  RATE: number;
+  TOTAL: number;
+  COMPANY_NAME: string;
+  DETAIL: string;
+  CURRENCY?: string;
+  TO_EMAIL?: string;
+  recipients?: string[];
+  EMAIL_HTML?: string;
+  FILE_BASE64?: string;
+  FILE_NAME?: string;
+  FILE_MIME?: string;
+  ATTACH_DEBUG?: AttachDebug;
+};
+
 type Result =
   | {
       tenantId: string;
@@ -254,7 +280,10 @@ async function getCountsPerTenant(t: Tenant): Promise<Counts> {
 
 let planPool: Pool | null = null;
 async function getRatePerUser(t: Tenant): Promise<number> {
+  // Prefer per-tenant rate if present
   if (typeof t.ratePerUser === 'number' && !Number.isNaN(t.ratePerUser)) return Number(t.ratePerUser);
+
+  // Optional global plan DB fallback
   if (!DB_URL || /@host[:/]/i.test(DB_URL)) return 0;
   try {
     if (!planPool) planPool = await mysql.createPool(DB_URL);
@@ -403,22 +432,6 @@ function computeQuantity(s: Counts) {
 /* =========================
    POST handler
    ========================= */
-type N8nPayload = {
-  DESCRIPTION: string;
-  QUANTITY: number;
-  RATE: number;
-  TOTAL: number;
-  COMPANY_NAME: string;
-  DETAIL: string;
-  CURRENCY?: string;
-  TO_EMAIL?: string;
-  recipients?: string[];
-  EMAIL_HTML?: string;
-  FILE_BASE64?: string;
-  FILE_NAME?: string;
-  FILE_MIME?: string;
-};
-
 async function postToN8N(payload: N8nPayload, tenantId: string, companyKey: string) {
   const ac = new AbortController();
   const to = setTimeout(() => ac.abort(), 15000);
@@ -442,7 +455,6 @@ async function postToN8N(payload: N8nPayload, tenantId: string, companyKey: stri
 
 export async function POST(req: NextRequest) {
   try {
-    // Optional auth
 
     if (!BILLING_WEBHOOK) return new Response('Missing BILLING_WEBHOOK', { status: 500 });
 
@@ -519,29 +531,60 @@ export async function POST(req: NextRequest) {
         issuedAt: todayStr,
       });
 
-      // (E) Attachment (optional)
+      // (E) Attachment (try pdf/png; fallback to .html) — ALWAYS send a file
       let FILE_BASE64: string | undefined;
       let FILE_NAME: string | undefined;
       let FILE_MIME: string | undefined;
-      let attachInfo: { ok: boolean; bytes?: number; name?: string; mime?: string; error?: string } = { ok: false };
+      const ATTACH_DEBUG: AttachDebug = { wanted: attach, tried: false, ok: false };
 
       try {
         if (attach === 'pdf') {
+          ATTACH_DEBUG.tried = true;
           const buf = await htmlToPDF(EMAIL_HTML);
           FILE_BASE64 = buf.toString('base64');
           FILE_NAME = `invoice-${t.companyKey}-${todayStr}.pdf`;
           FILE_MIME = 'application/pdf';
-          attachInfo = { ok: true, bytes: buf.length, name: FILE_NAME, mime: FILE_MIME };
+          ATTACH_DEBUG.ok = true;
+          ATTACH_DEBUG.bytes = buf.length;
+          ATTACH_DEBUG.name = FILE_NAME;
+          ATTACH_DEBUG.mime = FILE_MIME;
         } else if (attach === 'png') {
+          ATTACH_DEBUG.tried = true;
           const buf = await htmlToPNG(EMAIL_HTML);
           FILE_BASE64 = buf.toString('base64');
           FILE_NAME = `invoice-${t.companyKey}-${todayStr}.png`;
           FILE_MIME = 'image/png';
-          attachInfo = { ok: true, bytes: buf.length, name: FILE_NAME, mime: FILE_MIME };
-        } // 'none' -> no attachment
+          ATTACH_DEBUG.ok = true;
+          ATTACH_DEBUG.bytes = buf.length;
+          ATTACH_DEBUG.name = FILE_NAME;
+          ATTACH_DEBUG.mime = FILE_MIME;
+        }
       } catch (e: any) {
-        attachInfo = { ok: false, error: String(e?.message || e) };
+        ATTACH_DEBUG.ok = false;
+        ATTACH_DEBUG.error = String(e?.message || e);
       }
+
+      // Fallback to .html if PDF/PNG wasn't produced for any reason
+      if (!FILE_BASE64) {
+        const htmlBuf = Buffer.from(EMAIL_HTML, 'utf8');
+        FILE_BASE64 = htmlBuf.toString('base64');
+        FILE_NAME = `invoice-${t.companyKey}-${todayStr}.html`;
+        FILE_MIME = 'text/html';
+        ATTACH_DEBUG.fallback = 'html';
+        ATTACH_DEBUG.ok = true;
+        ATTACH_DEBUG.bytes = htmlBuf.length;
+        ATTACH_DEBUG.name = FILE_NAME;
+        ATTACH_DEBUG.mime = FILE_MIME;
+      }
+
+      // Build attachInfo summary for API response
+      const attachInfo = {
+        ok: ATTACH_DEBUG.ok,
+        bytes: ATTACH_DEBUG.bytes,
+        name: ATTACH_DEBUG.name,
+        mime: ATTACH_DEBUG.mime,
+        error: ATTACH_DEBUG.error,
+      };
 
       // (F) recipients
       const toEmailStr = t.invoiceEmails.join(',') || '';
@@ -564,6 +607,7 @@ export async function POST(req: NextRequest) {
             FILE_BASE64,
             FILE_NAME,
             FILE_MIME,
+            ATTACH_DEBUG, // diagnostic info for n8n
           },
           t.tenantId,
           t.companyKey,
