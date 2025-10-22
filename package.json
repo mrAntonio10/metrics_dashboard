@@ -44,6 +44,7 @@
     "next": "15.3.3",
     "node-cron": "^4.2.1",
     "patch-package": "^8.0.0",
+    "puppeteer": "^24.26.0",
     "react": "^18.3.1",
     "react-datepicker": "^8.8.0",
     "react-day-picker": "^8.10.1",
