@@ -26,14 +26,12 @@ docker run -d \
   -e METRICS_PATH=/var/lib/vivace-metrics/metrics.json \
   -e METRICS_HISTORY_DIR=/var/lib/vivace-metrics/history \
   -e METRICS_HISTORY_FILE=/var/lib/vivace-metrics/history.json \
-  -e TENANTS_DIR="/root/mr/vivace-api" \   # <-- AÑADIDO
+  -e TENANTS_DIR="/root/mr/vivace-api" \
   -v /var/lib/vivace-metrics:/var/lib/vivace-metrics:ro \
-  -v /root/mr/vivace-api:/root/mr/vivace-api:ro \      # lectura basta para .env.*
+  -v /root/mr/vivace-api:/root/mr/vivace-api:ro \
   metrics-dashboard:latest
-
 
 echo "==> Limpiando imágenes colgantes..."
 docker image prune -f
 
 echo "==> Despliegue completado correctamente ✅"
-
