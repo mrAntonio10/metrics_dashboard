@@ -12,14 +12,16 @@ export const dynamic = 'force-dynamic';
 /* =========================
    Config
    ========================= */
-const BILLING_WEBHOOK = 'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d';
+const BILLING_WEBHOOK =
+  process.env.BILLING_WEBHOOK?.trim() ||
+  'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d';
 
 const TENANTS_DIR = process.env.TENANTS_DIR || '/data/vivace-vivace-api';
 const ENV_PREFIX = '.env.';
 const DB_URL = (process.env.DATABASE_URL || '').trim();
 const TZ = 'America/La_Paz';
 
-// Quantity strategy: SUM | USERS | USERS_OR_SUM (default: SUM)
+// Quantity strategy: SUM | USERS | USERS_OR_SUM
 const BILLING_QUANTITY_STRATEGY = (process.env.BILLING_QUANTITY_STRATEGY || 'SUM')
   .toUpperCase() as 'SUM' | 'USERS' | 'USERS_OR_SUM';
 
@@ -124,7 +126,7 @@ type Tenant = {
   ratePerUser?: number;
   invoiceEmails: string[];
   appName: string;
-  currency: string;
+  currency: string; // always 'USD' here
 };
 type Counts = { users: number; clients: number; providers: number; admins: number };
 
@@ -201,7 +203,9 @@ async function readTenantEnv(file: string): Promise<Tenant> {
     normalizeEmails(env['BILLING_EMAIL']);
 
   const appName = env['APP_NAME'] || companyName;
-  const currency = (env['CURRENCY'] || 'BOB').toUpperCase();
+
+  // Force USD end-to-end (HTML, PDF/PNG, and webhook payload)
+  const currency = 'USD';
 
   return {
     tenantId,
@@ -304,14 +308,14 @@ function esc(s: any) {
   const str = String(s ?? '');
   return str.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!));
 }
-function fmtMoney(v: number, currency = 'BOB', locale = 'es-BO') {
+function fmtMoney(v: number, currency = 'USD', locale = 'en-US') {
   try {
     return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(v);
   } catch {
     return `${currency} ${Number(v || 0).toFixed(2)}`;
   }
 }
-function fmtNumber(v: number, locale = 'es-BO') {
+function fmtNumber(v: number, locale = 'en-US') {
   try {
     return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(v);
   } catch {
@@ -455,7 +459,6 @@ async function postToN8N(payload: N8nPayload, tenantId: string, companyKey: stri
 
 export async function POST(req: NextRequest) {
   try {
-
     if (!BILLING_WEBHOOK) return new Response('Missing BILLING_WEBHOOK', { status: 500 });
 
     const url = new URL(req.url);
@@ -463,6 +466,8 @@ export async function POST(req: NextRequest) {
     const force = url.searchParams.get('force') === '1';
     const sendZero = url.searchParams.get('sendZero') === '1';
     const attach = (url.searchParams.get('attach') || BILLING_ATTACH_DEFAULT) as 'pdf' | 'png' | 'none';
+    // Optional currency override (e.g., ?currency=USD)
+    const qCurrency = url.searchParams.get('currency')?.toUpperCase();
 
     const host = os.hostname();
     const todayStr = todayLocalYMDString();
@@ -519,6 +524,8 @@ export async function POST(req: NextRequest) {
       const DESCRIPTION = `${todayStr} — Scheduled Invoice (${t.managementStatus || 'N/A'})`;
       const DETAIL = `${snap.clients} clients, ${snap.providers} providers, ${snap.admins} admins — host=${host} envFile=${t.envFile}`;
 
+      const effectiveCurrency = qCurrency || t.currency; // t.currency is 'USD' by default
+
       const EMAIL_HTML = renderInvoiceHTML({
         appName: t.appName,
         description: DESCRIPTION,
@@ -527,7 +534,7 @@ export async function POST(req: NextRequest) {
         total: TOTAL,
         companyName: t.companyName,
         detail: DETAIL,
-        currency: t.currency,
+        currency: effectiveCurrency,
         issuedAt: todayStr,
       });
 
@@ -600,7 +607,7 @@ export async function POST(req: NextRequest) {
             TOTAL,
             COMPANY_NAME: t.companyName,
             DETAIL,
-            CURRENCY: t.currency,
+            CURRENCY: effectiveCurrency,
             TO_EMAIL: toEmailStr || undefined,
             recipients: recipientsArr,
             EMAIL_HTML,
