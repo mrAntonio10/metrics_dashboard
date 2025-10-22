@@ -42,6 +42,7 @@ function lastDayOfMonth(y: number, m: number) { return new Date(Date.UTC(y, m, 0
 function cmpYMD(a:{y:number;m:number;d:number}, b:{y:number;m:number;d:number}) {
   if (a.y !== b.y) return a.y - b.y; if (a.m !== b.m) return a.m - b.m; return a.d - b.d
 }
+/** due hoy si (1) hay anchor, (2) hoy >= anchor, (3) día = min(anchor.d, fin de mes) */
 function dueTodayMonthly(anchorYmd?: string) {
   const anchor = parseYMD(anchorYmd); if (!anchor) return false
   const today = todayLocalParts(); if (cmpYMD(today, anchor) < 0) return false
@@ -111,7 +112,11 @@ async function readTenantEnv(file: string): Promise<Tenant> {
   const usersTable = env['USERS_TABLE'] || 'users'
   const clientsTable = env['CLIENTS_TABLE'] || 'clients'
   const providersTable = env['PROVIDERS_TABLE'] || 'providers'
-  const ratePerUser = env['RATE_PER_USER'] ? Number(env['RATE_PER_USER']) : undefined
+
+  // Acepta RATE_PER_USER o USER_PRICE
+  const ratePerUser =
+    env['RATE_PER_USER'] ? Number(env['RATE_PER_USER'])
+    : (env['USER_PRICE'] ? Number(env['USER_PRICE']) : undefined)
 
   return {
     tenantId, companyKey, companyName, managementStatus, managementDate, envFile: file,
@@ -143,11 +148,9 @@ async function getCountsPerTenant(t: Tenant): Promise<Counts> {
       connectTimeout: 6000
     })
 
-    // clients
     const [cRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${t.tables.clients}\``)
     clients = Number((cRows as any)[0]?.c || 0)
 
-    // providers/admins (si no existe tabla 'providers', que no rompa)
     try {
       const [pRows] = await conn.query(`SELECT type, COUNT(*) AS c FROM \`${t.tables.providers}\` GROUP BY type`)
       const map = new Map<string, number>()
@@ -156,7 +159,6 @@ async function getCountsPerTenant(t: Tenant): Promise<Counts> {
       providers = map.get('provider') || 0
     } catch {}
 
-    // users (si existe):
     try {
       const [uRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${t.tables.users}\``)
       users = Number((uRows as any)[0]?.c || 0)
@@ -171,19 +173,21 @@ async function getCountsPerTenant(t: Tenant): Promise<Counts> {
 
 let planPool: Pool | null = null
 async function getRatePerUser(t: Tenant): Promise<number> {
-  // 1) Preferir RATE_PER_USER en el .env.* del tenant
+  // 1) Preferir la tarifa definida en el .env del tenant
   if (typeof t.ratePerUser === 'number' && !Number.isNaN(t.ratePerUser)) return Number(t.ratePerUser)
 
-  // 2) Fallback: leer de una tabla global si hay DATABASE_URL
-  if (!DB_URL) return 0
-  if (!planPool) {
-    planPool = await mysql.createPool(DB_URL)
+  // 2) Fallback opcional contra DB global (si está bien configurada)
+  if (!DB_URL || /@host[:/]/i.test(DB_URL)) return 0
+  try {
+    if (!planPool) planPool = await mysql.createPool(DB_URL)
+    const [rows] = await planPool.execute<RowDataPacket[]>(
+      'SELECT rate_per_user FROM billing_plan WHERE company_key = ? ORDER BY updated_at DESC LIMIT 1',
+      [t.companyKey],
+    )
+    return Number((rows as any)[0]?.rate_per_user ?? 0)
+  } catch {
+    return 0
   }
-  const [rows] = await planPool.execute<RowDataPacket[]>(
-    'SELECT rate_per_user FROM billing_plan WHERE company_key = ? ORDER BY updated_at DESC LIMIT 1',
-    [t.companyKey],
-  )
-  return Number((rows as any)[0]?.rate_per_user ?? 0)
 }
 
 /* =========================
@@ -241,49 +245,50 @@ export async function POST(req: NextRequest) {
     const results: Result[] = []
 
     for (const t of tenants) {
+      // (A) Solo procesar si tiene fecha (o si se fuerza)
+      if (!t.managementDate && !force) {
+        results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'no-management-date' })
+        continue
+      }
+      // (B) Solo el día que toca (o si se fuerza)
+      if (!force && !dueTodayMonthly(t.managementDate)) {
+        results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'not-due-today' })
+        continue
+      }
+
+      // (C) Snapshot DB del tenant (si falla, saltar suavemente)
+      let snap: Counts
       try {
-        // 1) Fecha
-        if (!t.managementDate && !force) {
-          results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'no-management-date' })
-          continue
-        }
-        if (!force && !dueTodayMonthly(t.managementDate)) {
-          results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'not-due-today' })
-          continue
-        }
+        snap = await getCountsPerTenant(t)
+      } catch (e:any) {
+        const tag = isSoftDbError(e) ? `db-skip:${e?.code || e?.message || 'unknown'}` : `skip:${e?.message || 'unknown'}`
+        results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: tag })
+        continue
+      }
 
-        // 2) Snapshot (DB propia)
-        let snap: Counts
-        try {
-          snap = await getCountsPerTenant(t)
-        } catch (e:any) {
-          const tag = isSoftDbError(e) ? `db-skip:${e?.code || e?.message || 'unknown'}` : `skip:${e?.message || 'unknown'}`
-          results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: tag })
-          continue
-        }
+      // (D) Tarifa y totales
+      const RATE = await getRatePerUser(t)
+      const QUANTITY = snap.users
+      const TOTAL = Number((QUANTITY * RATE).toFixed(2))
 
-        // 3) Tarifa
-        const RATE = await getRatePerUser(t)
-        const QUANTITY = snap.users
-        const TOTAL = Number((QUANTITY * RATE).toFixed(2))
+      if (!sendZero && (Number.isNaN(RATE) || RATE <= 0)) {
+        results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'no-rate' })
+        continue
+      }
+      if (!sendZero && (Number.isNaN(QUANTITY) || QUANTITY <= 0)) {
+        results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'no-users' })
+        continue
+      }
 
-        if (!sendZero && (Number.isNaN(RATE) || RATE <= 0)) {
-          results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'no-rate' })
-          continue
-        }
-        if (!sendZero && (Number.isNaN(QUANTITY) || QUANTITY <= 0)) {
-          results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: 'no-users' })
-          continue
-        }
+      // (E) Enviar a n8n
+      const DESCRIPTION = `${todayStr} — Scheduled Invoice (${t.managementStatus || 'N/A'})`
+      const DETAIL = `${snap.clients} clients, ${snap.providers} providers, ${snap.admins} admins — host=${host} envFile=${t.envFile}`
 
-        // 4) Enviar a n8n
-        const DESCRIPTION = `${todayStr} — Scheduled Invoice (${t.managementStatus || 'N/A'})`
-        const DETAIL = `${snap.clients} clients, ${snap.providers} providers, ${snap.admins} admins — host=${host} envFile=${t.envFile}`
-
-        const resp = await postToN8N({
-          DESCRIPTION, QUANTITY, RATE, TOTAL, COMPANY_NAME: t.companyName, DETAIL
-        }, t.tenantId, t.companyKey)
-
+      try {
+        const resp = await postToN8N(
+          { DESCRIPTION, QUANTITY, RATE, TOTAL, COMPANY_NAME: t.companyName, DETAIL },
+          t.tenantId, t.companyKey
+        )
         results.push({
           tenantId: t.tenantId,
           status: resp.status,
@@ -291,14 +296,11 @@ export async function POST(req: NextRequest) {
           error: resp.ok ? undefined : resp.text || 'unknown',
         })
       } catch (e:any) {
-        // Cualquier error por-tenant se degrada a "skip suave"
-        const tag = isSoftDbError(e) ? `db-skip:${e?.code || e?.message || 'unknown'}` : `skip:${e?.message || 'unknown'}`
-        results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: tag })
-        continue
+        results.push({ tenantId: t.tenantId, status: 204, ok: true, reason: `webhook-skip:${e?.message || 'unknown'}` })
       }
     }
 
-    // 200 salvo error global fuera del loop
+    // Siempre 200 (resumen de qué pasó por tenant)
     const payload = { ok: true, sent: results.length, results }
     return new Response(JSON.stringify(payload, null, 2), {
       status: 200, headers: { 'content-type': 'application/json' },
