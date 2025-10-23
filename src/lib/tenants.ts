@@ -90,7 +90,7 @@ export async function getTenantCounts(t: TenantConfig): Promise<TenantCounts> {
       providers = map.get('provider') || 0
     } catch {}
 
-    const users = clients + admins + providers
+    const users = admins + providers
     return { tenantId: t.id, tenantName: t.name, users, clients, admins, providers, management: t.management }
   } catch (e:any) {
     return { tenantId: t.id, tenantName: t.name, users: 0, clients: 0, admins: 0, providers: 0, management: t.management, error: e?.code || e?.message }
