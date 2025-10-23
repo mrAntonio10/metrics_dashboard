@@ -1,6 +1,7 @@
+// src/app/(portal)/usage/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
@@ -11,17 +12,24 @@ import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission
 
 // Recharts
 import {
-  ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
 } from 'recharts';
 
 /* =========================
- * Tipos
+ * Types
  * ========================= */
 
 type PortBinding = {
-  container: string;        // ej: "80/tcp"
-  host_ip: string | null;   // ej: "0.0.0.0" | "::" | null (no publicado)
-  host_port: string | null; // ej: "8085" | null (no publicado)
+  container: string;        // e.g., "80/tcp"
+  host_ip: string | null;   // e.g., "0.0.0.0" | "::" | null (not published)
+  host_port: string | null; // e.g., "8085" | null (not published)
 };
 
 type DockerNetwork = {
@@ -35,8 +43,8 @@ type Container = {
   name: string;
   image: string;
   status: string;
-  ports_list: string;         // texto de docker ps (puede venir vacío)
-  ports?: PortBinding[];      // estructura nueva
+  ports_list: string;         // raw docker ps text (may be empty)
+  ports?: PortBinding[];      // structured port bindings
   client: string;
   role: string;
   tls: { exposes_443: boolean };
@@ -82,20 +90,24 @@ type MetricsPayload = {
 };
 
 /* =========================
- * Helpers de formato
+ * Format helpers
  * ========================= */
 
 const labelHasAny = (labels: Record<string, string> | undefined, prefixes: string[]) => {
   if (!labels) return false;
   const keys = Object.keys(labels);
-  return keys.some(k => prefixes.some(p => k.startsWith(p)));
+  return keys.some((k) => prefixes.some((p) => k.startsWith(p)));
 };
 
-// String legible de puertos (prioriza JSON estructurado)
+// Human-readable ports string (prefers structured JSON if present)
 const pickPorts = (c: Container) => {
   if (Array.isArray(c.ports) && c.ports.length > 0) {
-    const published = [...new Set(c.ports.filter(p => p.host_port).map(p => `${p.host_ip ?? '*'}:${p.host_port} -> ${p.container}`))];
-    const exposed = [...new Set(c.ports.filter(p => !p.host_port).map(p => p.container))];
+    const published = [...new Set(
+      c.ports
+        .filter((p) => p.host_port)
+        .map((p) => `${p.host_ip ?? '*'}:${p.host_port} -> ${p.container}`),
+    )];
+    const exposed = [...new Set(c.ports.filter((p) => !p.host_port).map((p) => p.container))];
     if (published.length && exposed.length) return `${published.join(', ')} (exposed: ${exposed.join(', ')})`;
     if (published.length) return published.join(', ');
     if (exposed.length) return exposed.join(', ');
@@ -121,7 +133,7 @@ const percent = (num: number, den: number) => {
 };
 
 const coalesce = (...vals: (string | undefined | null)[]) =>
-  vals.find(v => !!v && v.trim().length > 0)?.trim() ?? '';
+  vals.find((v) => !!v && v.trim().length > 0)?.trim() ?? '';
 
 const fmtDuration = (sec?: number | null) => {
   if (sec == null || sec < 0) return '';
@@ -134,14 +146,14 @@ const fmtDuration = (sec?: number | null) => {
 };
 
 /* =========================
- * Fallbacks de snapshot
+ * Snapshot fallbacks
  * ========================= */
 const pickName = (c: Container) => {
   const fromLabel = c.labels?.['com.docker.compose.service'];
   const fromNetworks = Object.values(c.networks ?? {})
-    .flatMap(n => [...(n.DNSNames ?? []), ...(n.Aliases ?? [])])
+    .flatMap((n) => [...(n.DNSNames ?? []), ...(n.Aliases ?? [])])
     .find(Boolean);
-  const fromRole = (c.role && c.client && c.role !== 'unknown') ? `vivace-${c.role}-${c.client}` : '';
+  const fromRole = c.role && c.client && c.role !== 'unknown' ? `vivace-${c.role}-${c.client}` : '';
   return coalesce(c.name, fromLabel, fromNetworks, fromRole, c.id?.slice(0, 12));
 };
 
@@ -155,10 +167,10 @@ const pickStatus = (c: Container) => {
 };
 
 /* =========================
- * Componente
+ * Component
  * ========================= */
 export default function UsagePage() {
-  const [client, setClient] = useState('all');
+  const [client, setClient] = useState<string>('all');
   const [date, setDate] = useState<'live' | string>('live');
 
   const [data, setData] = useState<MetricsPayload | null>(null);
@@ -169,7 +181,7 @@ export default function UsagePage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historySeries, setHistorySeries] = useState<Array<{ date: string; cpu: number; ram: number }>>([]);
 
-  // Fechas disponibles
+  // Available dates
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -179,14 +191,19 @@ export default function UsagePage() {
         const j = await res.json();
         const dates: string[] = (j?.dates ?? []).filter(Boolean).sort();
         if (alive) setAvailableDates(dates);
-      } catch { /* noop */ }
+      } catch {
+        // noop
+      }
     })();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, []);
 
-  // Carga de métricas (live/snapshot)
+  // Load metrics (live or specific snapshot date)
   useEffect(() => {
     let alive = true;
+
     const load = async () => {
       try {
         setLoading(true);
@@ -194,29 +211,39 @@ export default function UsagePage() {
         const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as MetricsPayload;
-        if (alive) { setData(json); setError(null); }
+        if (alive) {
+          setData(json);
+          setError(null);
+        }
       } catch (e: any) {
-        if (alive) { setError(e?.message ?? 'fetch_failed'); setData(null); }
+        if (alive) {
+          setError(e?.message ?? 'fetch_failed');
+          setData(null);
+        }
       } finally {
         if (alive) setLoading(false);
       }
     };
+
     load();
-    let id: any;
+    let id: ReturnType<typeof setInterval> | undefined;
     if (date === 'live') id = setInterval(load, 10_000);
-    return () => { alive = false; if (id) clearInterval(id); };
+    return () => {
+      alive = false;
+      if (id) clearInterval(id);
+    };
   }, [date]);
 
   const clients = useMemo(() => ['all', ...(data?.clients ?? [])], [data]);
 
   const selectedAgg = useMemo(() => {
     if (!data) return [];
-    return client === 'all' ? data.client_agg : data.client_agg.filter(a => a.client === client);
+    return client === 'all' ? data.client_agg : data.client_agg.filter((a) => a.client === client);
   }, [data, client]);
 
   const visibleContainers = useMemo<Container[]>(() => {
     if (!data) return [];
-    const list = client === 'all' ? data.containers : data.containers.filter(c => c.client === client);
+    const list = client === 'all' ? data.containers : data.containers.filter((c) => c.client === client);
     return list.slice().sort((a, b) => {
       const ca = a.client.localeCompare(b.client);
       if (ca !== 0) return ca;
@@ -226,9 +253,12 @@ export default function UsagePage() {
     });
   }, [data, client]);
 
-  // Histórico (CPU% y RAM%)
+  // Historical CPU% and RAM% across last snapshots (or by selected client)
   useEffect(() => {
-    if (availableDates.length === 0) { setHistorySeries([]); return; }
+    if (availableDates.length === 0) {
+      setHistorySeries([]);
+      return;
+    }
     const lastDates = availableDates.slice(-14);
     let cancel = false;
     (async () => {
@@ -240,15 +270,13 @@ export default function UsagePage() {
             if (!r.ok) return null;
             const j = (await r.json()) as MetricsPayload;
             return { date: d, payload: j };
-          })
+          }),
         );
         if (cancel) return;
         const series = results
           .filter((x): x is { date: string; payload: MetricsPayload } => !!x)
           .map(({ date, payload }) => {
-            const aggs = client === 'all'
-              ? payload.client_agg
-              : payload.client_agg.filter(a => a.client === client);
+            const aggs = client === 'all' ? payload.client_agg : payload.client_agg.filter((a) => a.client === client);
             const cpu = aggs.reduce((acc, a) => acc + (a.cpu_percent_sum || 0), 0);
             const memUsed = aggs.reduce((acc, a) => acc + (a.mem_used_bytes_sum || 0), 0);
             const memLimit = aggs.reduce((acc, a) => acc + (a.mem_limit_bytes_sum || 0), 0);
@@ -260,25 +288,32 @@ export default function UsagePage() {
         if (!cancel) setHistoryLoading(false);
       }
     })();
-    return () => { cancel = true; };
+    return () => {
+      cancel = true;
+    };
   }, [availableDates, client]);
-
 
   const filteredHistory = useMemo(() => {
     if (date === 'live' || historySeries.length === 0) return historySeries;
     return historySeries.filter((x) => x.date <= date);
   }, [historySeries, date]);
 
+  const onClientChange = useCallback((v: string) => setClient(v), []);
+  const onDateChange = useCallback((v: string) => setDate(v as 'live' | string), []);
+
   return (
     <ProtectedComponent permissionKey="page:usage" fallback={<AccessDeniedFallback />}>
-      <PageHeader title="Usage Administration" description="Métricas reales de Docker por cliente, con histórico diario.">
+      <PageHeader
+        title="Usage Administration"
+        description="Per-client Docker metrics with a daily snapshot history."
+      >
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={client} onValueChange={setClient}>
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="Filter by Client..." />
+          <Select value={client} onValueChange={onClientChange}>
+            <SelectTrigger className="w-[220px]" aria-label="Filter by client">
+              <SelectValue placeholder="Filter by client..." />
             </SelectTrigger>
             <SelectContent>
-              {clients.map(c => (
+              {clients.map((c) => (
                 <SelectItem key={c} value={c}>
                   {c === 'all' ? 'All Clients' : c}
                 </SelectItem>
@@ -286,24 +321,36 @@ export default function UsagePage() {
             </SelectContent>
           </Select>
 
-          <Select value={date} onValueChange={(v) => setDate(v as any)}>
-            <SelectTrigger className="w-[220px]">
+          <Select value={date} onValueChange={onDateChange}>
+            <SelectTrigger className="w-[220px]" aria-label="Select snapshot date">
               <SelectValue placeholder="Select date..." />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem key="live" value="live">Live (ahora)</SelectItem>
-              {availableDates.slice().reverse().map(d => (
-                <SelectItem key={d} value={d}>{d}</SelectItem>
-              ))}
+              <SelectItem key="live" value="live">
+                Live (now)
+              </SelectItem>
+              {availableDates
+                .slice()
+                .reverse()
+                .map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {d}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
 
           <Separator orientation="vertical" className="h-6" />
 
-          {data?.docker?.running
-            ? <Badge variant="outline" className="border-green-500/50 text-green-600">Docker OK ({data.docker.server_version})</Badge>
-            : <Badge variant="outline" className="border-red-500/50 text-red-600">Docker DOWN</Badge>
-          }
+          {data?.docker?.running ? (
+            <Badge variant="outline" className="border-green-500/50 text-green-600">
+              Docker OK ({data.docker.server_version})
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="border-red-500/50 text-red-600">
+              Docker DOWN
+            </Badge>
+          )}
 
           {availableDates.length > 0 && (
             <span className="text-xs text-muted-foreground">
@@ -321,7 +368,7 @@ export default function UsagePage() {
           <Card>
             <CardHeader>
               <CardTitle>
-                {client === 'all' ? 'All Clients' : client} – CPU% y RAM% (últimos snapshots)
+                {client === 'all' ? 'All Clients' : client} – CPU% and RAM% (latest snapshots)
               </CardTitle>
             </CardHeader>
             <CardContent className="h-[320px]">
@@ -329,23 +376,50 @@ export default function UsagePage() {
                 <LineChart data={filteredHistory}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="date" />
-                  <YAxis yAxisId="left" domain={[0, 'auto']} tickFormatter={(v) => `${v}%`} />
-                  <YAxis yAxisId="right" orientation="right" domain={[0, 'auto']} tickFormatter={(v) => `${v}%`} />
-                  <Tooltip formatter={(v: any) => `${v}%`} />
+                  <YAxis
+                    yAxisId="left"
+                    domain={[0, 'auto']}
+                    tickFormatter={(v) => `${v}%`}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    domain={[0, 'auto']}
+                    tickFormatter={(v) => `${v}%`}
+                  />
+                  <RechartsTooltip formatter={(v: any) => `${v}%`} />
                   <Legend />
-                  <Line type="monotone" dataKey="cpu" name="CPU %" yAxisId="left" dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="ram" name="RAM %" yAxisId="right" dot={false} strokeWidth={2} />
+                  <Line
+                    type="monotone"
+                    dataKey="cpu"
+                    name="CPU %"
+                    yAxisId="left"
+                    dot={false}
+                    strokeWidth={2}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="ram"
+                    name="RAM %"
+                    yAxisId="right"
+                    dot={false}
+                    strokeWidth={2}
+                  />
                 </LineChart>
               </ResponsiveContainer>
-              {historyLoading && <div className="text-xs text-muted-foreground mt-2">Cargando histórico…</div>}
+              {historyLoading && (
+                <div className="text-xs text-muted-foreground mt-2">Loading history…</div>
+              )}
             </CardContent>
           </Card>
         )}
 
         <Card>
-          <CardHeader><CardTitle>Client aggregates</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Client Aggregates</CardTitle>
+          </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {selectedAgg.map(a => {
+            {selectedAgg.map((a) => {
               const memPct = percent(a.mem_used_bytes_sum, a.mem_limit_bytes_sum);
               return (
                 <div key={a.client} className="rounded-xl border p-4 space-y-2">
@@ -383,7 +457,9 @@ export default function UsagePage() {
         </Card>
 
         <Card>
-          <CardHeader><CardTitle>Containers</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle>Containers</CardTitle>
+          </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
@@ -400,8 +476,10 @@ export default function UsagePage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visibleContainers.map(c => {
-                  const ram = `${fmtBytes(c.stats.mem_used_bytes)} / ${fmtBytes(c.stats.mem_limit_bytes)} (${fmtNum(c.stats.mem_percent)}%)`;
+                {visibleContainers.map((c) => {
+                  const ram = `${fmtBytes(c.stats.mem_used_bytes)} / ${fmtBytes(
+                    c.stats.mem_limit_bytes,
+                  )} (${fmtNum(c.stats.mem_percent)}%)`;
                   const net = `${fmtBytes(c.stats.net_rx_bytes)} / ${fmtBytes(c.stats.net_tx_bytes)}`;
                   return (
                     <TableRow key={c.id}>
@@ -409,7 +487,9 @@ export default function UsagePage() {
                         {pickName(c)}
                         <div className="text-[10px] text-muted-foreground">{pickImage(c)}</div>
                       </TableCell>
-                      <TableCell><Badge variant="outline">{c.client}</Badge></TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{c.client}</Badge>
+                      </TableCell>
                       <TableCell>{c.role}</TableCell>
                       <TableCell className="text-right">{fmtNum(c.stats.cpu_percent)}%</TableCell>
                       <TableCell className="text-right">{ram}</TableCell>
@@ -420,7 +500,11 @@ export default function UsagePage() {
                       </TableCell>
                       <TableCell>
                         <span className="text-xs">{pickStatus(c)}</span>
-                        {c.tls.exposes_443 && <Badge className="ml-2" variant="outline">TLS/443</Badge>}
+                        {c.tls.exposes_443 && (
+                          <Badge className="ml-2" variant="outline">
+                            TLS/443
+                          </Badge>
+                        )}
                       </TableCell>
                     </TableRow>
                   );

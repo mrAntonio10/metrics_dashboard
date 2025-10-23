@@ -1,7 +1,7 @@
 // src/app/(support)/page.tsx
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
 import { TicketsTable } from '@/components/tickets-table';
@@ -15,30 +15,30 @@ import { Button } from '@/components/ui/button';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 
-// Fallbacks de SLA si el backend no envía política
+// SLA fallbacks (used if backend does not provide a policy)
 const SLA_DEFAULTS = {
   goalFirstResponsePercent: 95,
   goalResolutionPercent: 90,
-  targetFirstResponseMinutes: 240,  // 4h
-  targetResolutionMinutes: 2880,    // 48h
-};
+  targetFirstResponseMinutes: 240, // 4h
+  targetResolutionMinutes: 2880,   // 48h
+} as const;
 
 const diffMinutes = (a?: string, b?: string) => {
   if (!a || !b) return undefined;
   const tA = new Date(a).getTime();
   const tB = new Date(b).getTime();
-  if (isNaN(tA) || isNaN(tB)) return undefined;
+  if (Number.isNaN(tA) || Number.isNaN(tB)) return undefined;
   return Math.max(0, Math.round((tA - tB) / 60000));
 };
 
 export default function SupportPage() {
-  // ➜ Filtros que viajan al webhook (company, month, status, urgency)
+  // Filters forwarded to webhook (company, month, status, urgency)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   const {
-    tickets,            // datos del webhook (ya filtrados por n8n)
-    companies,          // [{value,label}] desde n8n
-    pagination,         // paginación del backend (n8n)
+    tickets,            // webhook data (already filtered by n8n)
+    companies,          // [{ value, label }] from n8n
+    pagination,         // backend pagination
     loading,
     error,
     filters,            // { month, company, status, urgency, ... }
@@ -46,28 +46,31 @@ export default function SupportPage() {
     goToPage,
     changePageSize,
     catalogs,           // { availableStatuses?, availableUrgencies? }
-    slaPolicy,          // política SLA opcional
+    slaPolicy,          // optional SLA policy
   } = useTickets();
 
-  // Month (DatePicker) → viaja al webhook
-  const handleDateChange = (date: Date | null) => {
-    if (!date) return;
-    setSelectedDate(date);
-    const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    updateFilters({ month: monthYear }); // no llames goToPage(1): el hook ya lo resetea
-  };
+  // Month (DatePicker) → sent as 'YYYY-MM'
+  const handleDateChange = useCallback(
+    (date: Date | null) => {
+      if (!date) return;
+      setSelectedDate(date);
+      const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      updateFilters({ month: monthYear }); // hook resets page
+    },
+    [updateFilters],
+  );
 
-  const handleClearDate = () => {
+  const handleClearDate = useCallback(() => {
     setSelectedDate(null);
-    updateFilters({ month: 'all' }); // el hook resetea page
-  };
+    updateFilters({ month: 'all' }); // hook resets page
+  }, [updateFilters]);
 
-  // Opciones para combos (si n8n ya las manda, úsalas; si no, deduce desde tickets)
+  // Options for selects (prefer backend catalogs; otherwise derive from tickets)
   const statusOptions = useMemo(() => {
     const fromApi = catalogs?.availableStatuses;
     if (fromApi?.length) return ['all', ...fromApi];
     const set = new Set<string>();
-    tickets.forEach(t => t.status && set.add(String(t.status).trim()));
+    tickets.forEach((t) => t.status && set.add(String(t.status).trim()));
     return ['all', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
   }, [tickets, catalogs?.availableStatuses]);
 
@@ -75,18 +78,18 @@ export default function SupportPage() {
     const fromApi = catalogs?.availableUrgencies;
     if (fromApi?.length) return ['all', ...fromApi];
     const set = new Set<string>();
-    tickets.forEach(t => t.urgencyLevel && set.add(String(t.urgencyLevel).trim()));
+    tickets.forEach((t) => t.urgencyLevel && set.add(String(t.urgencyLevel).trim()));
     return ['all', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
   }, [tickets, catalogs?.availableUrgencies]);
 
-  // KPIs (sobre data ya filtrada por n8n)
+  // KPIs (based on data already filtered by n8n)
   const kpis = useMemo(() => {
     const totalTickets = pagination?.totalItems ?? tickets.length;
     const resolvedTickets = tickets.filter(
-      t => t.status?.toLowerCase() === 'resolved' || t.status?.toLowerCase() === 'closed'
+      (t) => t.status?.toLowerCase() === 'resolved' || t.status?.toLowerCase() === 'closed',
     ).length;
     const highPriorityTickets = tickets.filter(
-      t => t.urgencyLevel?.toLowerCase() === 'high' || t.urgencyLevel?.toLowerCase() === 'critical'
+      (t) => t.urgencyLevel?.toLowerCase() === 'high' || t.urgencyLevel?.toLowerCase() === 'critical',
     ).length;
 
     const resolutionRate = totalTickets > 0 ? Math.round((resolvedTickets / totalTickets) * 100) : 0;
@@ -98,11 +101,11 @@ export default function SupportPage() {
     };
   }, [tickets, pagination?.totalItems]);
 
-  // Gráfico volumen por fecha (ordenado)
+  // Volume by date (sorted)
   const chartData = useMemo(() => {
     const map = tickets.reduce((acc, t) => {
       const d = t.issueStarted ? new Date(t.issueStarted) : null;
-      const key = d && !isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : 'N/A'; // YYYY-MM-DD
+      const key = d && !Number.isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : 'N/A'; // YYYY-MM-DD
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
@@ -111,7 +114,7 @@ export default function SupportPage() {
       .map(([date, value]) => ({ date, value }));
   }, [tickets]);
 
-  // SLA Attainment (goal vs actual) calculado desde tickets + política backend (o defaults)
+  // SLA attainment (goal vs actual) computed from tickets + backend policy (or defaults)
   const computedSlaData = useMemo(() => {
     const policy = slaPolicy ?? SLA_DEFAULTS;
 
@@ -120,14 +123,16 @@ export default function SupportPage() {
 
     for (const t of tickets) {
       // FIRST RESPONSE
-      const frMin = t.firstResponseMinutes ?? diffMinutes(t.firstResponseAt, t.issueStarted);
+      const frMin =
+        t.firstResponseMinutes ?? diffMinutes(t.firstResponseAt, t.issueStarted);
       if (typeof frMin === 'number') {
         frElig++;
         if (frMin <= policy.targetFirstResponseMinutes) frMet++;
       }
 
       // RESOLUTION
-      const resMin = t.resolutionMinutes ?? diffMinutes(t.resolvedAt, t.issueStarted);
+      const resMin =
+        t.resolutionMinutes ?? diffMinutes(t.resolvedAt, t.issueStarted);
       if (typeof resMin === 'number') {
         resElig++;
         if (resMin <= policy.targetResolutionMinutes) resMet++;
@@ -150,13 +155,13 @@ export default function SupportPage() {
         description="Track ticket volume, SLA performance, and customer satisfaction."
       >
         <div className="flex flex-wrap items-center gap-2">
-          {/* Company → n8n */}
+          {/* Company → forwarded to n8n */}
           <Select
             value={filters.company}
-            onValueChange={(value) => { updateFilters({ company: value }); }}
+            onValueChange={(value) => updateFilters({ company: value })}
           >
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Filter by Client..." />
+            <SelectTrigger className="w-[200px]" aria-label="Filter by company">
+              <SelectValue placeholder="Filter by company..." />
             </SelectTrigger>
             <SelectContent>
               {companies.map((company) => (
@@ -167,7 +172,7 @@ export default function SupportPage() {
             </SelectContent>
           </Select>
 
-          {/* Month (DatePicker) → n8n */}
+          {/* Month (DatePicker) → forwarded to n8n */}
           <div className="flex items-center gap-2">
             <div className="relative">
               <DatePicker
@@ -175,7 +180,7 @@ export default function SupportPage() {
                 onChange={handleDateChange}
                 dateFormat="MM/yyyy"
                 showMonthYearPicker
-                placeholderText="Select Month/Year"
+                placeholderText="Select month/year"
                 className="w-[140px] px-3 py-2 text-sm border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 wrapperClassName="w-full"
                 calendarClassName="!font-sans"
@@ -187,19 +192,20 @@ export default function SupportPage() {
                 size="sm"
                 onClick={handleClearDate}
                 className="px-2"
+                aria-label="Clear month filter"
               >
                 All Months
               </Button>
             )}
           </div>
 
-          {/* Status → n8n */}
+          {/* Status → forwarded to n8n */}
           <Select
             value={filters.status}
-            onValueChange={(v) => { updateFilters({ status: v }); }}
+            onValueChange={(v) => updateFilters({ status: v })}
           >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by Status..." />
+            <SelectTrigger className="w-[180px]" aria-label="Filter by status">
+              <SelectValue placeholder="Filter by status..." />
             </SelectTrigger>
             <SelectContent>
               {statusOptions.map((opt) => (
@@ -210,13 +216,13 @@ export default function SupportPage() {
             </SelectContent>
           </Select>
 
-          {/* Urgency → n8n */}
+          {/* Urgency → forwarded to n8n */}
           <Select
             value={filters.urgency}
-            onValueChange={(v) => { updateFilters({ urgency: v }); }}
+            onValueChange={(v) => updateFilters({ urgency: v })}
           >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter by Urgency..." />
+            <SelectTrigger className="w-[180px]" aria-label="Filter by urgency">
+              <SelectValue placeholder="Filter by urgency..." />
             </SelectTrigger>
             <SelectContent>
               {urgencyOptions.map((opt) => (
@@ -231,7 +237,10 @@ export default function SupportPage() {
 
       <div className="space-y-6">
         {error && (
-          <div className="bg-destructive/15 border border-destructive text-destructive px-4 py-2 rounded-md">
+          <div
+            role="alert"
+            className="bg-destructive/15 border border-destructive text-destructive px-4 py-2 rounded-md"
+          >
             Error: {error}
           </div>
         )}
@@ -285,7 +294,7 @@ export default function SupportPage() {
           </Card>
         </div>
 
-        {/* Tabla con paginación del backend */}
+        {/* Tickets table (backend-paginated) */}
         <TicketsTable
           tickets={tickets}
           loading={loading}

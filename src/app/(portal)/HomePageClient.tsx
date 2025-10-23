@@ -1,27 +1,53 @@
-'use client'
+'use client';
 
-import { useMemo, useTransition } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { PageHeader } from '@/components/page-header'
-import { KpiCard } from '@/components/kpi-card'
-import { CreditCard, Users, AlertTriangle, CalendarClock } from 'lucide-react'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
-import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
-import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useMemo, useTransition } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { PageHeader } from '@/components/page-header';
+import { KpiCard } from '@/components/kpi-card';
+import { CreditCard, Users, AlertTriangle, CalendarClock } from 'lucide-react';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
+import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-export type Org = { id: string; name: string }
+export type Org = { id: string; name: string };
 export type CountRow = {
-  tenantId: string
-  tenantName: string
-  users: number
-  clients: number
-  admins: number
-  providers: number
-  management?: { status: string; date: string }
-  error?: string
+  tenantId: string;
+  tenantName: string;
+  users: number;
+  clients: number;
+  admins: number;
+  providers: number;
+  management?: { status: string; date: string }; // date expected as YYYY-MM-DD (local)
+  error?: string;
+};
+
+type ManagementStatus = 'TRIAL' | 'SUBSCRIBED' | '' | undefined;
+
+/** Utilities */
+function parseLocalDateFromYMD(ymd?: string | null): Date | null {
+  if (!ymd) return null;
+  // Force local interpretation to avoid TZ drift.
+  const d = new Date(`${ymd}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function addOneMonth(date: Date | null): Date | null {
+  if (!date) return null;
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + 1);
+  return next;
+}
+
+function formatLocal(d: Date | null): string | undefined {
+  if (!d) return undefined;
+  try {
+    return d.toLocaleDateString();
+  } catch {
+    return undefined;
+  }
 }
 
 export default function HomePageClient({
@@ -29,33 +55,33 @@ export default function HomePageClient({
   counts,
   selectedClient,
 }: {
-  orgs: Org[]
-  counts: CountRow[]
-  selectedClient: string
+  orgs: Org[];
+  counts: CountRow[];
+  selectedClient: string;
 }) {
-  const router = useRouter()
-  const pathname = usePathname()
-  const search = useSearchParams()
-  const [isPending, startTransition] = useTransition()
+  const router = useRouter();
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const [isPending, startTransition] = useTransition();
 
   const handleSelectClient = (val: string) => {
     startTransition(() => {
-      const params = new URLSearchParams(search.toString())
-      if (!val || val === 'all') params.delete('client')
-      else params.set('client', val)
-      router.replace(`${pathname}?${params.toString()}`)
-    })
-  }
+      const params = new URLSearchParams(search.toString());
+      if (!val || val === 'all') params.delete('client');
+      else params.set('client', val);
+      router.replace(`${pathname}?${params.toString()}`);
+    });
+  };
 
   const filtered = useMemo(
     () => (selectedClient === 'all' ? counts : counts.filter((c) => c.tenantId === selectedClient)),
     [counts, selectedClient],
-  )
+  );
 
-  const totalUsers = filtered.reduce((a, b) => a + b.users, 0)
-  const totalClients = filtered.reduce((a, b) => a + b.clients, 0)
-  const totalAdmins = filtered.reduce((a, b) => a + b.admins, 0)
-  const totalProviders = filtered.reduce((a, b) => a + b.providers, 0)
+  const totalUsers = filtered.reduce((a, b) => a + b.users, 0);
+  const totalClients = filtered.reduce((a, b) => a + b.clients, 0);
+  const totalAdmins = filtered.reduce((a, b) => a + b.admins, 0);
+  const totalProviders = filtered.reduce((a, b) => a + b.providers, 0);
 
   const barData = filtered.map((row) => ({
     name: row.tenantName,
@@ -63,25 +89,28 @@ export default function HomePageClient({
     Clients: row.clients,
     Admins: row.admins,
     Providers: row.providers,
-  }))
+  }));
 
-  const errored = filtered.filter((r) => r.error)
+  const errored = filtered.filter((r) => r.error);
 
-  async function handleStatusChange(tenantId: string, newStatus: string) {
+  async function handleStatusChange(tenantId: string, newStatus: ManagementStatus) {
     await fetch('/api/tenants/update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tenantId, status: newStatus }),
-    })
-    router.refresh()
+    });
+    startTransition(() => router.refresh());
   }
 
   return (
     <ProtectedComponent permissionKey="page:home" fallback={<AccessDeniedFallback />}>
       <PageHeader title="Executive Summary" description="De-identified ops metrics (direct DB).">
         <div className="flex flex-wrap items-center gap-2">
-          <Select onValueChange={handleSelectClient} value={selectedClient === 'all' ? undefined : selectedClient}>
-            <SelectTrigger className="w-[220px]">
+          <Select
+            onValueChange={handleSelectClient}
+            value={selectedClient === 'all' ? undefined : selectedClient}
+          >
+            <SelectTrigger className="w-[220px]" aria-busy={isPending}>
               <SelectValue
                 placeholder={
                   selectedClient === 'all'
@@ -104,8 +133,8 @@ export default function HomePageClient({
 
       {errored.length > 0 && (
         <Alert className="bg-red-50 border-red-200">
-          <AlertTriangle className="h-4 w-4 text-red-500" />
-          <AlertTitle className="text-red-700 font-bold">Tenants con error</AlertTitle>
+          <AlertTriangle className="h-4 w-4 text-red-500" aria-hidden="true" />
+          <AlertTitle className="text-red-700 font-bold">Tenants with errors</AlertTitle>
           <AlertDescription className="text-red-700">
             {errored.map((e) => (
               <div key={e.tenantId}>
@@ -117,124 +146,118 @@ export default function HomePageClient({
       )}
 
       <div className="space-y-6">
-        {/* KPIs globales */}
+        {/* Global KPIs */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             title="Total Users"
             value={String(totalUsers)}
-            icon={<Users className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Suma de usuarios por ambiente (consulta directa a BD)."
+            icon={<Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+            tooltip="Sum of users per tenant (direct DB query)."
           />
           <KpiCard
             title="Total Clients"
             value={String(totalClients)}
             change={0}
             changePeriod="now"
-            icon={<CreditCard className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Suma de clientes por ambiente (consulta directa a BD)."
+            icon={<CreditCard className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+            tooltip="Sum of clients per tenant (direct DB query)."
           />
           <KpiCard
             title="Total Admins"
             value={String(totalAdmins)}
             change={0}
             changePeriod="now"
-            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Usuarios con type='admin' en providers."
+            icon={<AlertTriangle className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+            tooltip="Users with type='admin' in providers."
           />
           <KpiCard
             title="Total Providers"
             value={String(totalProviders)}
             change={0}
             changePeriod="now"
-            icon={<Users className="h-4 w-4 text-muted-foreground" />}
-            tooltip="Usuarios con type='provider' en providers."
+            icon={<Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />}
+            tooltip="Users with type='provider' in providers."
           />
         </div>
 
-        {/* Cards por cliente */}
+        {/* Per-tenant cards */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 mt-4">
           {filtered.map((t) => {
-            const status = t.management?.status || ''
-            const date = t.management?.date
-              ? new Date(`${t.management.date}T00:00:00`) // fuerza interpretación local
-              : null
-            // 📅 Calcular fecha límite = mismo día del siguiente mes
-            const limitDate = date ? new Date(date) : null
-            if (limitDate) limitDate.setMonth(limitDate.getMonth() + 1)
+            const status = (t.management?.status as ManagementStatus) || '';
+            const sinceDate = parseLocalDateFromYMD(t.management?.date || null);
+            const renewalDate = addOneMonth(sinceDate);
 
-            // ⚠️ Determinar expiración
-            const expired = status === 'TRIAL' && limitDate && Date.now() >= limitDate.getTime()
+            const isExpired = status === 'TRIAL' && renewalDate && Date.now() >= renewalDate.getTime();
 
-            let nextLabel = ''
-            let nextStatus = ''
+            let ctaLabel = '';
+            let ctaNextStatus: ManagementStatus = undefined;
+
             if (!status) {
-              nextLabel = 'Start Trial'
-              nextStatus = 'TRIAL'
-            } else if (status === 'TRIAL' && expired) {
-              nextLabel = 'Activate Subscription'
-              nextStatus = 'SUBSCRIBED'
+              ctaLabel = 'Start Trial';
+              ctaNextStatus = 'TRIAL';
+            } else if (status === 'TRIAL' && isExpired) {
+              ctaLabel = 'Activate Subscription';
+              ctaNextStatus = 'SUBSCRIBED';
             } else if (status === 'SUBSCRIBED') {
-              nextLabel = 'Renew'
-              nextStatus = 'SUBSCRIBED'
+              ctaLabel = 'Renew';
+              ctaNextStatus = 'SUBSCRIBED';
             }
 
-            const color =
+            const cardTone =
               !status
                 ? 'bg-yellow-50 border-yellow-200 text-yellow-700'
-                : expired
+                : isExpired
                   ? 'bg-red-50 border-red-200 text-red-700'
                   : status === 'TRIAL'
                     ? 'bg-blue-50 border-blue-200 text-blue-700'
-                    : 'bg-green-50 border-green-200 text-green-700'
+                    : 'bg-green-50 border-green-200 text-green-700';
 
             const statusText =
               !status
                 ? '🆕 NEW CLIENT'
-                : expired
+                : isExpired
                   ? '⚠️ TRIAL EXPIRED'
                   : status === 'TRIAL'
-                    ? `⏳ TRIAL (until ${limitDate?.toLocaleDateString()})`
-                    : `✅ SUBSCRIBED (renew by ${limitDate?.toLocaleDateString()})`
+                    ? `⏳ TRIAL (until ${formatLocal(renewalDate) ?? 'N/A'})`
+                    : `✅ SUBSCRIBED (renew by ${formatLocal(renewalDate) ?? 'N/A'})`;
 
             return (
-              <Card key={t.tenantId} className={`${color}`}>
+              <Card key={t.tenantId} className={cardTone}>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     {t.tenantName}
-                    {limitDate && (
+                    {renewalDate && (
                       <span className="flex items-center text-xs text-muted-foreground">
-                        <CalendarClock className="h-3 w-3 mr-1" />
-                        {limitDate.toLocaleDateString()}
+                        <CalendarClock className="h-3 w-3 mr-1" aria-hidden="true" />
+                        {formatLocal(renewalDate)}
                       </span>
                     )}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2">
                   <div className="text-sm font-semibold">{statusText}</div>
-                  {date && (
-                    <div className="text-xs text-muted-foreground">
-                      Since: {date.toLocaleDateString()}
-                    </div>
+                  {sinceDate && (
+                    <div className="text-xs text-muted-foreground">Since: {formatLocal(sinceDate)}</div>
                   )}
-                  {nextLabel && (
+                  {ctaLabel && ctaNextStatus && (
                     <button
-                      onClick={() => handleStatusChange(t.tenantId, nextStatus)}
+                      onClick={() => handleStatusChange(t.tenantId, ctaNextStatus)}
                       className="text-sm px-3 py-1 rounded-md bg-primary text-white w-fit hover:opacity-90"
                     >
-                      {nextLabel}
+                      {ctaLabel}
                     </button>
                   )}
                 </CardContent>
               </Card>
-            )
+            );
           })}
         </div>
 
-        {/* Chart comparativo */}
+        {/* Comparison chart */}
         <div className="grid gap-4 lg:grid-cols-1">
           <Card>
             <CardHeader>
-              <CardTitle>Comparación por Ambiente (Usuarios vs Clientes vs Providers)</CardTitle>
+              <CardTitle>Tenant Comparison (Users · Clients · Providers)</CardTitle>
             </CardHeader>
             <CardContent>
               <ChartContainer config={{}} className="h-64">
@@ -254,5 +277,5 @@ export default function HomePageClient({
         </div>
       </div>
     </ProtectedComponent>
-  )
+  );
 }

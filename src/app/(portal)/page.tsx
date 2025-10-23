@@ -4,7 +4,7 @@ import path from 'path'
 import mysql from 'mysql2/promise'
 import HomePageClient from './HomePageClient'
 
-export const dynamic = 'force-dynamic' // evita pre-render estático
+export const dynamic = 'force-dynamic' // avoid static pre-rendering
 
 type TenantConfig = {
   id: string
@@ -22,11 +22,11 @@ export type TenantCounts = {
   clients: number
   admins: number
   providers: number
-  management?: { status: string; date: string } // ✅ añadimos este campo
+  management?: { status: string; date: string } // added this field
   error?: string
 }
 
-const TENANTS_DIR = '/root/mr/vivace-api/' // ruta dentro del contenedor
+const TENANTS_DIR = '/root/mr/vivace-api/' // path inside the container
 
 function parseDotEnv(content: string): Record<string, string> {
   const out: Record<string, string> = {}
@@ -49,7 +49,7 @@ async function loadTenants(): Promise<TenantConfig[]> {
   try {
     entries = await fs.readdir(path.resolve(TENANTS_DIR))
   } catch (e) {
-    console.error('No se pudo leer el directorio:', TENANTS_DIR, e)
+    console.error('Failed to read directory:', TENANTS_DIR, e)
     return []
   }
 
@@ -91,7 +91,7 @@ async function loadTenants(): Promise<TenantConfig[]> {
         },
       })
     } catch (e) {
-      console.error('Error leyendo', file, e)
+      console.error('Error reading', file, e)
     }
   }
   return tenants
@@ -110,11 +110,11 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
   try {
     conn = await mysql.createConnection(base)
 
-    // Conteo de clientes
+    // Client count
     const [cRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${tenant.tables.clients}\``)
     const clients = Number((cRows as any)[0]?.c || 0)
 
-    // Conteo de providers por tipo
+    // Provider count by type
     let admins = 0
     let providers = 0
     try {
@@ -128,7 +128,7 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
       admins = map.get('admin') || 0
       providers = map.get('provider') || 0
     } catch (err: any) {
-      console.warn('providers table missing or incompatible in', tenant.id, err.code)
+      console.warn('Providers table missing or incompatible in', tenant.id, err.code)
     }
 
     const users = clients + admins + providers
@@ -140,7 +140,7 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
       clients,
       admins,
       providers,
-      management: tenant.management, // ✅ Pasamos el management
+      management: tenant.management, // pass management metadata
     }
   } catch (e: any) {
     console.error('DB error', tenant.id, e?.code || e?.message || e)

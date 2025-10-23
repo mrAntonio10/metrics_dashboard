@@ -1,7 +1,7 @@
 // src/app/(feedback)/page.tsx
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { ProtectedComponent } from '@/hooks/use-permission';
 import {
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 
-import { useFeedback } from '@/hooks/use-feedbacks'; // <-- singular
+import { useFeedback } from '@/hooks/use-feedbacks'; // hook name intentionally singular
 import { FeedbackTable } from '@/components/feedback-table';
 
 export default function FeedbackPage() {
@@ -26,25 +26,28 @@ export default function FeedbackPage() {
     loading,
     error,
     filters,            // { company, month, page, pageSize }
-    updateFilters,
+    updateFilters,      // updates filter state (resets page when relevant)
     goToPage,
     changePageSize,
   } = useFeedback();
 
-  // Month (DatePicker) → viaja al webhook como 'YYYY-MM'
+  // Month (DatePicker) → forwarded to webhook as 'YYYY-MM'
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
-  const handleDateChange = (date: Date | null) => {
-    if (!date) return;
-    setSelectedDate(date);
-    const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    updateFilters({ month: monthYear }); // el hook resetea page
-  };
+  const handleDateChange = useCallback(
+    (date: Date | null) => {
+      if (!date) return;
+      setSelectedDate(date);
+      const monthYear = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      updateFilters({ month: monthYear }); // hook resets page
+    },
+    [updateFilters],
+  );
 
-  const handleClearDate = () => {
+  const handleClearDate = useCallback(() => {
     setSelectedDate(null);
-    updateFilters({ month: 'all' }); // el hook resetea page
-  };
+    updateFilters({ month: 'all' }); // hook resets page
+  }, [updateFilters]);
 
   const companyOptions = useMemo(() => companies, [companies]);
 
@@ -52,16 +55,16 @@ export default function FeedbackPage() {
     <ProtectedComponent permissionKey="page:feedback">
       <PageHeader
         title="Customer Feedback"
-        description="Browse customer opinions by client and month."
+        description="Browse customer opinions by company and month."
       >
         <div className="flex flex-wrap items-center gap-2">
-          {/* Company → n8n */}
+          {/* Company → forwarded to n8n */}
           <Select
             value={filters.company}
             onValueChange={(v) => updateFilters({ company: v })}
           >
-            <SelectTrigger className="w-[220px]">
-              <SelectValue placeholder="Filter by Client..." />
+            <SelectTrigger className="w-[220px]" aria-label="Filter by company">
+              <SelectValue placeholder="Filter by company..." />
             </SelectTrigger>
             <SelectContent>
               {companyOptions.map((c) => (
@@ -72,7 +75,7 @@ export default function FeedbackPage() {
             </SelectContent>
           </Select>
 
-          {/* Month (DatePicker) → n8n */}
+          {/* Month (DatePicker) → forwarded to n8n */}
           <div className="flex items-center gap-2">
             <div className="relative">
               <DatePicker
@@ -80,7 +83,7 @@ export default function FeedbackPage() {
                 onChange={handleDateChange}
                 dateFormat="MM/yyyy"
                 showMonthYearPicker
-                placeholderText="Select Month/Year"
+                placeholderText="Select month/year"
                 className="w-[140px] px-3 py-2 text-sm border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 wrapperClassName="w-full"
                 calendarClassName="!font-sans"
@@ -92,6 +95,7 @@ export default function FeedbackPage() {
                 size="sm"
                 onClick={handleClearDate}
                 className="px-2"
+                aria-label="Clear month filter"
               >
                 All Months
               </Button>
@@ -102,7 +106,10 @@ export default function FeedbackPage() {
 
       <div className="space-y-6">
         {error && (
-          <div className="bg-destructive/15 border border-destructive text-destructive px-4 py-2 rounded-md">
+          <div
+            role="alert"
+            className="bg-destructive/15 border border-destructive text-destructive px-4 py-2 rounded-md"
+          >
             Error: {error}
           </div>
         )}
