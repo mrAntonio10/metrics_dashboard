@@ -1,11 +1,11 @@
 // app/payment/page.tsx
 import React from 'react';
 import Payment from '@/components/Payment/Payment';
-import { ProtectedComponent } from '@/hooks/use-permission';
+import { AccessDeniedFallback, ProtectedComponent } from '@/hooks/use-permission';
 
 export default function PaymentPage() {
   return (
-    <ProtectedComponent permissionKey="page:payment">
+    <ProtectedComponent permissionKey="page:payment" fallback={<AccessDeniedFallback />}>
       <Payment />
     </ProtectedComponent>
   );

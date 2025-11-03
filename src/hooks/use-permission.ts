@@ -14,7 +14,7 @@ const PERMISSIONS: Record<string, Role[]> = {
     'page:platform': ['OWNER', 'ADMIN'],
     'page:feedback': ['OWNER', 'CSM', 'SUPPORT', 'ADMIN'],
     'page:settings': ['ADMIN'],
-    
+    'page:payment': ['OWNER', 'FINANCE', 'ADMIN'],
     // Widget access
     'widget:mrr_arr': ['OWNER', 'FINANCE', 'ADMIN'],
     'widget:collections': ['OWNER', 'FINANCE', 'ADMIN'],
@@ -38,15 +38,15 @@ const PERMISSIONS: Record<string, Role[]> = {
 };
 
 export function usePermission(permissionKey: string) {
-  const { role } = useRole();
-  const allowedRoles = PERMISSIONS[permissionKey];
+    const { role } = useRole();
+    const allowedRoles = PERMISSIONS[permissionKey];
 
-  if (!allowedRoles) {
-    console.warn(`Permission key "${permissionKey}" not found.`);
-    return false;
-  }
+    if (!allowedRoles) {
+        console.warn(`Permission key "${permissionKey}" not found.`);
+        return false;
+    }
 
-  return allowedRoles.includes(role);
+    return allowedRoles.includes(role);
 }
 
 
@@ -62,7 +62,7 @@ export function ProtectedComponent({
     const hasPermission = usePermission(permissionKey);
 
     if (hasPermission) {
-        return <>{children}</>;
+        return <>{ children } </>;
     }
 
     return fallback || null;
@@ -70,12 +70,12 @@ export function ProtectedComponent({
 
 export function AccessDeniedFallback() {
     return (
-        <Card className="flex h-full min-h-[200px] items-center justify-center bg-muted/30 shadow-none">
-            <CardContent className="p-6 text-center text-muted-foreground">
-                <Lock className="mx-auto h-8 w-8" />
-                <p className="mt-2 text-sm font-medium">Access Denied</p>
-                <p className="mt-1 text-xs">You do not have permission to view this section.</p>
-            </CardContent>
-        </Card>
+        <Card className= "flex h-full min-h-[200px] items-center justify-center bg-muted/30 shadow-none" >
+        <CardContent className="p-6 text-center text-muted-foreground" >
+            <Lock className="mx-auto h-8 w-8" />
+                <p className="mt-2 text-sm font-medium" > Access Denied </p>
+                    < p className = "mt-1 text-xs" > You do not have permission to view this section.</p>
+                        </CardContent>
+                        </Card>
     );
 }
