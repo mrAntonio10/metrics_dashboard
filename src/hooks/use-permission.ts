@@ -77,5 +77,5 @@ export function AccessDeniedFallback() {
                     < p className = "mt-1 text-xs" > You do not have permission to view this section.</p>
                         </CardContent>
                         </Card>
-    );
+  );
 }

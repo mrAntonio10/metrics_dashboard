@@ -13,7 +13,7 @@ const PERMISSIONS: Record<string, Role[]> = {
     'page:support': ['OWNER', 'SUPPORT', 'CSM', 'ADMIN'],
     'page:feedback': ['OWNER', 'CSM', 'SUPPORT', 'ADMIN'],
     'page:settings': ['ADMIN'],
-    
+    'page:payment': ['OWNER', 'FINANCE', 'SUPPORT', 'CSM', 'ADMIN'],
     // Widget access
     'widget:mrr_arr': ['OWNER', 'FINANCE', 'ADMIN'],
     'widget:collections': ['OWNER', 'FINANCE', 'ADMIN'],
@@ -37,15 +37,15 @@ const PERMISSIONS: Record<string, Role[]> = {
 };
 
 export function usePermission(permissionKey: string) {
-  const { role } = useRole();
-  const allowedRoles = PERMISSIONS[permissionKey];
+    const { role } = useRole();
+    const allowedRoles = PERMISSIONS[permissionKey];
 
-  if (!allowedRoles) {
-    console.warn(`Permission key "${permissionKey}" not found.`);
-    return false;
-  }
+    if (!allowedRoles) {
+        console.warn(`Permission key "${permissionKey}" not found.`);
+        return false;
+    }
 
-  return allowedRoles.includes(role);
+    return allowedRoles.includes(role);
 }
 
 
