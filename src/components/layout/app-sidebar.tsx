@@ -14,6 +14,7 @@ const navItems = [
   { href: '/usage', label: 'Usage', icon: BarChart3, permission: 'page:usage' },
   { href: '/support', label: 'Support', icon: LifeBuoy, permission: 'page:support' },
   { href: '/feedback', label: 'Feedback', icon: MessageSquare, permission: 'page:feedback' },
+  { href: '/payment', label: 'Payment', icon: CreditCard, permission: 'page:payment' },
 ];
 
 const settingsNav = { href: '/settings', label: 'Settings', icon: SettingsIcon, permission: 'page:settings' };
@@ -40,13 +41,13 @@ export function AppSidebar() {
       </ProtectedComponent>
     );
   };
-  
+
   return (
     <Sidebar variant="inset" side="left">
       <SidebarHeader>
         <Link href="/" className="flex items-center gap-2 p-2" title="Aggregate Insights Home">
-            <ShieldCheck className="h-8 w-8 text-primary" />
-            <span className="text-xl font-bold text-sidebar-foreground">Aggregate Insights</span>
+          <ShieldCheck className="h-8 w-8 text-primary" />
+          <span className="text-xl font-bold text-sidebar-foreground">Aggregate Insights</span>
         </Link>
       </SidebarHeader>
 
@@ -61,9 +62,9 @@ export function AppSidebar() {
         <SidebarMenu>
           <NavLink item={settingsNav} />
         </SidebarMenu>
-         <div className="p-4 text-xs text-sidebar-foreground/60 space-y-2">
-            <Badge variant="outline" className="border-green-500/50 text-green-400">HIPAA-Safe</Badge>
-            <p>This is a prototype. No PHI is displayed.</p>
+        <div className="p-4 text-xs text-sidebar-foreground/60 space-y-2">
+          <Badge variant="outline" className="border-green-500/50 text-green-400">HIPAA-Safe</Badge>
+          <p>This is a prototype. No PHI is displayed.</p>
         </div>
       </SidebarFooter>
     </Sidebar>
