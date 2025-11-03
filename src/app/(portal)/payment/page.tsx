@@ -1,7 +1,7 @@
 // app/payment/page.tsx
 import React from 'react';
-import ProtectedComponent from '@/components/ProtectedComponent';
 import Payment from '@/components/Payment/Payment';
+import { ProtectedComponent } from '@/hooks/use-permission';
 
 export default function PaymentPage() {
   return (
