@@ -1,10 +1,7 @@
+// src/app/api/payments/create-intent/route.ts
 import Stripe from 'stripe';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-
-if (!stripeSecretKey) {
-  console.error('❌ STRIPE_SECRET_KEY no está configurado en el entorno');
-}
 
 const stripe = stripeSecretKey
   ? new Stripe(stripeSecretKey, { apiVersion: '2024-06-20' })
@@ -19,23 +16,30 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = await req.json();
-    const { amount, description, customerEmail, customerName } = body;
+    const { amount, description, customerEmail, customerName } = await req.json();
 
-    if (!amount || !customerEmail) {
+    if (!amount || !customerEmail || !customerName) {
       return new Response(
-        JSON.stringify({ error: 'Datos incompletos para crear el pago' }),
+        JSON.stringify({ error: 'Faltan datos para procesar el pago.' }),
+        { status: 400 }
+      );
+    }
+
+    const cents = Math.round(Number(amount) * 100);
+    if (!Number.isFinite(cents) || cents <= 0) {
+      return new Response(
+        JSON.stringify({ error: 'Monto inválido.' }),
         { status: 400 }
       );
     }
 
     const paymentIntent = await stripe.paymentIntents.create({
-      amount: Math.round(Number(amount) * 100), // de USD a cents
+      amount: cents,
       currency: 'usd',
-      description: description || 'Pago Vivace',
+      description: description || 'Pago de suscripción',
       receipt_email: customerEmail,
       metadata: {
-        customerName: customerName || '',
+        customerName,
       },
       automatic_payment_methods: { enabled: true },
     });
@@ -44,7 +48,7 @@ export async function POST(req: Request) {
       JSON.stringify({ clientSecret: paymentIntent.client_secret }),
       { status: 200 }
     );
-  } catch (error: any) {
+  } catch (error) {
     console.error('Error creando PaymentIntent:', error);
     return new Response(
       JSON.stringify({ error: 'Error creando el pago en Stripe' }),
