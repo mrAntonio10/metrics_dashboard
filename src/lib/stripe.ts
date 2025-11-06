@@ -9,9 +9,11 @@ declare global {
 const pk = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
 
 if (!pk && typeof window !== 'undefined') {
-  // Solo log en cliente
-  console.error('Stripe publishable key no configurada.');
+  console.error(
+    'Stripe publishable key is not configured. Set NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY.'
+  );
 }
 
 export const stripePromise =
-  globalThis._stripePromise ?? (globalThis._stripePromise = pk ? loadStripe(pk) : Promise.resolve(null));
+  globalThis._stripePromise ??
+  (globalThis._stripePromise = pk ? loadStripe(pk) : Promise.resolve(null));

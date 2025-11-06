@@ -115,6 +115,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           }),
         });
 
+
         const data = await response.json();
 
         if (response.ok && data?.clientSecret) {
@@ -386,8 +387,8 @@ const Payment: React.FC = () => {
                           completed
                             ? 'bg-emerald-500 text-white'
                             : active
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-100 text-slate-500',
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 text-slate-500',
                         ].join(' ')}
                       >
                         {completed ? <CheckCircle className="w-3 h-3" /> : step.id}
@@ -397,8 +398,8 @@ const Payment: React.FC = () => {
                           active
                             ? 'text-blue-700'
                             : completed
-                            ? 'text-slate-500'
-                            : 'text-slate-400'
+                              ? 'text-slate-500'
+                              : 'text-slate-400'
                         }
                       >
                         {step.label}
