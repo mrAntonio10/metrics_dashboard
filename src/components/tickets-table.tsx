@@ -89,13 +89,20 @@ export const TicketsTable: React.FC<TicketsTableProps> = ({
     );
   }
 
+  // ✅ Ensure tickets are sorted by most recent issueStarted (DESC)
+  const sortedTickets = [...tickets].sort((a, b) => {
+    const dateA = new Date(a.issueStarted).getTime();
+    const dateB = new Date(b.issueStarted).getTime();
+    return dateB - dateA; // newer first
+  });
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Support Tickets ({pagination.totalItems})</CardTitle>
       </CardHeader>
       <CardContent>
-        {tickets.length === 0 ? (
+        {sortedTickets.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             No tickets found for the selected filters.
           </div>
@@ -115,7 +122,7 @@ export const TicketsTable: React.FC<TicketsTableProps> = ({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {tickets.map((ticket) => (
+                  {sortedTickets.map((ticket) => (
                     <TableRow key={ticket.ticketId}>
                       <TableCell className="font-mono text-sm">
                         {ticket.ticketId}
@@ -146,7 +153,7 @@ export const TicketsTable: React.FC<TicketsTableProps> = ({
               </Table>
             </div>
 
-            {/* Paginación */}
+            {/* Pagination */}
             <div className="flex items-center justify-between space-x-2 py-4">
               <div className="flex items-center space-x-2">
                 <p className="text-sm font-medium">Rows per page</p>
