@@ -335,11 +335,12 @@ const Payment: React.FC = () => {
       ...prev,
       amount: product.allowCustomAmount
         ? ''
-        : ((product.price ?? 0).toFixed(2)), // always "19.00"
+        : ((product.price ?? 0).toFixed(2)),
       description: product.allowCustomAmount
-        ? 'Custom payment'
+        ? ''
         : product.name,
     }));
+
 
     setCurrentStep(2);
   };
@@ -362,6 +363,10 @@ const Payment: React.FC = () => {
 
     if (!rawAmount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
       newErrors.amount = 'Enter a valid amount.';
+    }
+
+    if (selectedProduct?.allowCustomAmount && !paymentData.description.trim()) {
+      newErrors.description = 'Description is required for custom payments.';
     }
 
     setErrors(newErrors);
@@ -454,8 +459,8 @@ const Payment: React.FC = () => {
                           completed
                             ? 'bg-emerald-500 text-white'
                             : active
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-100 text-slate-500',
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 text-slate-500',
                         ].join(' ')}
                       >
                         {completed ? (
@@ -469,8 +474,8 @@ const Payment: React.FC = () => {
                           active
                             ? 'text-blue-700'
                             : completed
-                            ? 'text-slate-500'
-                            : 'text-slate-400'
+                              ? 'text-slate-500'
+                              : 'text-slate-400'
                         }
                       >
                         {step.label}
@@ -617,33 +622,30 @@ const Payment: React.FC = () => {
                   </div>
 
                   {isCustom && (
-                    <div>
-                      <label className="block text-sm font-medium text-slate-700 mb-1">
-                        Amount (USD) *
-                      </label>
-                      <div className="relative">
-                        <DollarSign className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Description *
+                        </label>
                         <input
-                          type="number"
-                          min="1"
-                          step="0.01"
-                          value={paymentData.amount}
+                          type="text"
+                          value={paymentData.description}
                           onChange={(e) =>
                             setPaymentData({
                               ...paymentData,
-                              amount: e.target.value,
+                              description: e.target.value,
                             })
                           }
-                          className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                          placeholder="e.g. 149.00"
+                          className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          placeholder="e.g. One-time setup fee for Client X"
                         />
+                        {errors.description && (
+                          <p className="text-xs text-red-500 mt-1">
+                            {errors.description}
+                          </p>
+                        )}
                       </div>
-                      {errors.amount && (
-                        <p className="text-xs text-red-500 mt-1">
-                          {errors.amount}
-                        </p>
-                      )}
-                    </div>
+                    </>
                   )}
 
                   {!isCustom && (

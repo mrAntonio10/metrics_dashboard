@@ -15,6 +15,7 @@ const PERMISSIONS: Record<string, Role[]> = {
     'page:feedback': ['OWNER', 'CSM', 'SUPPORT', 'ADMIN'],
     'page:settings': ['ADMIN'],
     'page:payment': ['OWNER', 'FINANCE', 'SUPPORT', 'CSM', 'ADMIN'],
+    'page:payment-history': ['OWNER', 'FINANCE', 'SUPPORT', 'CSM', 'ADMIN'],
     // Widget access
     'widget:mrr_arr': ['OWNER', 'FINANCE', 'ADMIN'],
     'widget:collections': ['OWNER', 'FINANCE', 'ADMIN'],
