@@ -27,14 +27,15 @@ import {
 interface Product {
   id: number;
   name: string;
-  price: number;
+  price?: number; // optional for custom
   description: string;
   features?: string[];
   highlight?: boolean;
+  allowCustomAmount?: boolean;
 }
 
 interface PaymentData {
-  amount: string;
+  amount: string; // stored as a string; normalized before sending
   description: string;
   customerEmail: string;
   customerName: string;
@@ -90,12 +91,20 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [processing, setProcessing] = useState<boolean>(false);
   const [paymentError, setPaymentError] = useState<string>('');
 
-  // Create PaymentIntent when billing details are ready
+  // Helper to normalize to decimal number
+  const getNormalizedAmount = (): number => {
+    const raw = String(paymentData.amount).trim().replace(',', '.');
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  // Create PaymentIntent when billing details + amount are ready
   useEffect(() => {
+    const normalized = getNormalizedAmount();
     const canCreate =
-      paymentData.amount &&
-      paymentData.customerEmail &&
-      paymentData.customerName;
+      !!paymentData.customerEmail &&
+      !!paymentData.customerName &&
+      normalized > 0;
 
     if (!canCreate) return;
 
@@ -108,7 +117,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amount: parseFloat(paymentData.amount),
+            amount: normalized, // decimal; backend converts to cents
             customerEmail: paymentData.customerEmail,
             customerName: paymentData.customerName,
             description: paymentData.description,
@@ -125,6 +134,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           );
         }
       } catch (err) {
+        console.error('Error initializing payment intent', err);
         setPaymentError(
           'Network error while initializing the payment. Please try again.'
         );
@@ -134,7 +144,13 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     };
 
     createIntent();
-  }, [paymentData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    paymentData.amount,
+    paymentData.customerEmail,
+    paymentData.customerName,
+    paymentData.description,
+  ]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -164,13 +180,14 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     );
 
     if (error) {
-      const msg = error.message || 'An error occurred while processing your payment.';
+      const msg =
+        error.message || 'An error occurred while processing your payment.';
       setPaymentError(msg);
       onError(msg);
     } else if (paymentIntent?.status === 'succeeded') {
       onSuccess({
         paymentIntentId: paymentIntent.id,
-        amount: paymentIntent.amount / 100,
+        amount: paymentIntent.amount / 100, // back to dollars
         currency: paymentIntent.currency,
         status: 'success',
       });
@@ -183,6 +200,13 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 
     setProcessing(false);
   };
+
+  // Display amount in the button
+  const displayAmount = (() => {
+    const n = getNormalizedAmount();
+    if (n > 0) return n.toFixed(2);
+    return paymentData.amount || '--';
+  })();
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
@@ -236,7 +260,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           ) : (
             <>
               <CreditCard className="w-4 h-4 mr-2" />
-              Confirm & pay ${paymentData.amount}
+              Confirm & pay ${displayAmount}
             </>
           )}
         </button>
@@ -287,11 +311,18 @@ const Payment: React.FC = () => {
       name: 'Enterprise',
       price: 99,
       description: 'Designed for mission-critical multi-tenant environments.',
+      features: ['Dedicated SLA', 'Guided onboarding', 'Advanced integrations'],
+    },
+    {
+      id: 4,
+      name: 'Custom',
+      description: 'Set a tailored one-time or special agreement amount.',
       features: [
-        'Dedicated SLA',
-        'Guided onboarding',
-        'Advanced integrations',
+        'Ideal for custom contracts',
+        'Manual billing alignment',
+        'Flexible pricing',
       ],
+      allowCustomAmount: true,
     },
   ];
 
@@ -299,11 +330,17 @@ const Payment: React.FC = () => {
 
   const handleProductSelect = (product: Product) => {
     setSelectedProduct(product);
-    setPaymentData((prev) => ({
+
+    setPaymentData(prev => ({
       ...prev,
-      amount: product.price.toString(),
-      description: product.name,
+      amount: product.allowCustomAmount
+        ? ''
+        : ((product.price ?? 0).toFixed(2)), // always "19.00"
+      description: product.allowCustomAmount
+        ? 'Custom payment'
+        : product.name,
     }));
+
     setCurrentStep(2);
   };
 
@@ -320,8 +357,11 @@ const Payment: React.FC = () => {
       newErrors.customerEmail = 'Enter a valid email address.';
     }
 
-    if (!paymentData.amount || parseFloat(paymentData.amount) <= 0) {
-      newErrors.amount = 'Please select a plan before continuing.';
+    const rawAmount = String(paymentData.amount).trim().replace(',', '.');
+    const parsedAmount = Number(rawAmount);
+
+    if (!rawAmount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+      newErrors.amount = 'Enter a valid amount.';
     }
 
     setErrors(newErrors);
@@ -350,6 +390,26 @@ const Payment: React.FC = () => {
     });
     setErrors({});
   };
+
+  // Helper: show price/amount in sidebar
+  const getSidebarAmountLabel = () => {
+    if (!selectedProduct) return null;
+
+    if (selectedProduct.allowCustomAmount) {
+      const normalized = Number(
+        String(paymentData.amount).trim().replace(',', '.')
+      );
+      if (normalized > 0) {
+        return `$${normalized.toFixed(2)}`;
+      }
+      return '--';
+    }
+
+    const price = selectedProduct.price ?? 0;
+    return `$${price.toFixed(2)}`;
+  };
+
+  const isCustom = !!selectedProduct?.allowCustomAmount;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-indigo-50">
@@ -434,7 +494,7 @@ const Payment: React.FC = () => {
                   You can upgrade, downgrade, or cancel your subscription at any
                   time.
                 </p>
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-4 sm:grid-cols-4">
                   {products.map((p) => (
                     <button
                       key={p.id}
@@ -458,10 +518,14 @@ const Payment: React.FC = () => {
                         </span>
                       </div>
                       <div className="text-2xl font-semibold text-slate-900">
-                        ${p.price}
-                        <span className="text-xs font-normal text-slate-500">
-                          /month
-                        </span>
+                        {p.allowCustomAmount
+                          ? 'Custom amount'
+                          : `$${(p.price ?? 0).toFixed(2)}`}
+                        {!p.allowCustomAmount && (
+                          <span className="text-xs font-normal text-slate-500">
+                            /month
+                          </span>
+                        )}
                       </div>
                       <p className="text-[11px] text-slate-600">
                         {p.description}
@@ -483,7 +547,7 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {/* Step 2: customer details */}
+            {/* Step 2: customer details + custom amount if needed */}
             {currentStep === 2 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
@@ -552,6 +616,47 @@ const Payment: React.FC = () => {
                     )}
                   </div>
 
+                  {isCustom && (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Amount (USD) *
+                      </label>
+                      <div className="relative">
+                        <DollarSign className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                        <input
+                          type="number"
+                          min="1"
+                          step="0.01"
+                          value={paymentData.amount}
+                          onChange={(e) =>
+                            setPaymentData({
+                              ...paymentData,
+                              amount: e.target.value,
+                            })
+                          }
+                          className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          placeholder="e.g. 149.00"
+                        />
+                      </div>
+                      {errors.amount && (
+                        <p className="text-xs text-red-500 mt-1">
+                          {errors.amount}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {!isCustom && (
+                    <>
+                      {/* Hidden but validated by preset amount */}
+                      {errors.amount && (
+                        <p className="text-xs text-red-500 mt-1">
+                          {errors.amount}
+                        </p>
+                      )}
+                    </>
+                  )}
+
                   <div className="flex items-center justify-between gap-3 pt-2">
                     <button
                       type="button"
@@ -617,7 +722,7 @@ const Payment: React.FC = () => {
                     <p className="text-sm text-slate-600 max-w-md mx-auto">
                       We’ve processed your payment of{' '}
                       <span className="font-semibold">
-                        ${paymentResult.amount}{' '}
+                        ${paymentResult.amount?.toFixed(2)}{' '}
                         {paymentResult.currency?.toUpperCase()}
                       </span>
                       . A receipt will be sent to your email.
@@ -664,16 +769,18 @@ const Payment: React.FC = () => {
               <>
                 <div className="flex items-baseline justify-between">
                   <div>
-                    <p className="text-xs text-slate-500">Selected plan</p>
+                    <p className="text-xs text-slate-500">Selected option</p>
                     <p className="text-sm font-semibold text-slate-900">
                       {selectedProduct.name}
                     </p>
                   </div>
                   <div className="text-right">
                     <p className="text-xl font-semibold text-slate-900">
-                      ${selectedProduct.price}
+                      {getSidebarAmountLabel()}
                     </p>
-                    <p className="text-[10px] text-slate-500">USD / month</p>
+                    <p className="text-[10px] text-slate-500">
+                      {isCustom ? 'USD' : 'USD / month'}
+                    </p>
                   </div>
                 </div>
                 <ul className="mt-2 space-y-1.5 text-[10px] text-slate-600">
@@ -687,7 +794,8 @@ const Payment: React.FC = () => {
               </>
             ) : (
               <p className="text-xs text-slate-500">
-                Select a plan to see a breakdown of your subscription.
+                Select a plan or custom option to see a breakdown of your
+                payment.
               </p>
             )}
 
