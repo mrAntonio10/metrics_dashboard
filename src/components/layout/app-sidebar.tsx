@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CreditCard, Home, LifeBuoy, MessageSquare, Server, BarChart3, Settings as SettingsIcon, ShieldCheck } from 'lucide-react';
+import { CreditCard, Home, LifeBuoy, MessageSquare, Server, BarChart3, Settings as SettingsIcon, ShieldCheck, ReceiptText } from 'lucide-react';
 import { Sidebar, SidebarHeader, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarFooter } from '@/components/ui/sidebar';
 import { ProtectedComponent } from '@/hooks/use-permission';
 import { Separator } from '@/components/ui/separator';
@@ -15,6 +15,7 @@ const navItems = [
   { href: '/support', label: 'Support', icon: LifeBuoy, permission: 'page:support' },
   { href: '/feedback', label: 'Feedback', icon: MessageSquare, permission: 'page:feedback' },
   { href: '/payment', label: 'Payment', icon: CreditCard, permission: 'page:payment' },
+  { href: '/payment-history', label: 'Payment History', icon: ReceiptText, permission: 'page:payment-history' },
 ];
 
 const settingsNav = { href: '/settings', label: 'Settings', icon: SettingsIcon, permission: 'page:settings' };
