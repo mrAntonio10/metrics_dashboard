@@ -2,19 +2,31 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-
-if (!stripeSecretKey) {
-  throw new Error('STRIPE_SECRET_KEY is not set in environment variables');
-}
-
-const stripe = new Stripe(stripeSecretKey, {
-  apiVersion: '2025-10-29.clover', // o la versión que tengas configurada en tu cuenta
-});
+const STRIPE_API_VERSION: Stripe.LatestApiVersion = '2024-06-20'; // o la de tu cuenta
 
 export async function GET(request: Request) {
   try {
+    const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+
+    // ⚠️ Importante:
+    // No lanzamos error en tiempo de build; respondemos 500 sólo si en runtime no está configurada.
+    if (!stripeSecretKey) {
+      return NextResponse.json(
+        {
+          error: true,
+          message:
+            'Server misconfiguration: STRIPE_SECRET_KEY is not set. Please configure it in your runtime environment.',
+        },
+        { status: 500 },
+      );
+    }
+
+    const stripe = new Stripe(stripeSecretKey, {
+      apiVersion: STRIPE_API_VERSION,
+    });
+
     const { searchParams } = new URL(request.url);
+
     const page = searchParams.get('page') || undefined;
     const limitParam = searchParams.get('limit');
     let limit = 10;
@@ -33,7 +45,6 @@ export async function GET(request: Request) {
     });
 
     const items = searchResult.data.map((ch) => {
-      // country preferimos billing_details.address.country; si no, país de la tarjeta
       const billingCountry =
         ch.billing_details?.address?.country ||
         (ch.payment_method_details?.type === 'card'
@@ -48,17 +59,17 @@ export async function GET(request: Request) {
 
       return {
         id: ch.id,
-        object: ch.object, // normalmente "charge"
-        amount: ch.amount / 100, // a unidades decimales
+        object: ch.object,
+        amount: ch.amount / 100,
         currency: ch.currency,
         description: ch.description || '',
         name: ch.billing_details?.name || '',
         email: ch.billing_details?.email || '',
         country: billingCountry,
         networkTransactionId,
-        created: ch.created, // unix ts
+        created: ch.created,
         receiptUrl: ch.receipt_url || null,
-        status: ch.status, // "succeeded"
+        status: ch.status,
       };
     });
 
@@ -73,7 +84,8 @@ export async function GET(request: Request) {
     return NextResponse.json(
       {
         error: true,
-        message: error?.message || 'Unable to fetch paid charges from Stripe',
+        message:
+          error?.message || 'Unable to fetch paid charges from Stripe',
       },
       { status: 500 },
     );
