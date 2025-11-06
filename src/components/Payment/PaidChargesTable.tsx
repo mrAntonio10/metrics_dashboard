@@ -17,14 +17,14 @@ import {
 interface PaidCharge {
   id: string;
   object: string;
-  amount: number; // ya en decimales
+  amount: number; // already in decimals
   currency: string;
   description: string;
   name: string;
   email: string;
   country: string;
   networkTransactionId: string | null;
-  created: number;
+  created: number; // unix timestamp (seconds)
   receiptUrl: string | null;
   status: string;
 }
@@ -39,8 +39,8 @@ const pageSize = 10;
 
 const PaidChargesTable: React.FC = () => {
   const [data, setData] = useState<PaidCharge[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string>('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [currentPageCursor, setCurrentPageCursor] = useState<string | null>(null);
   const [nextPageCursor, setNextPageCursor] = useState<string | null>(null);
   const [previousCursors, setPreviousCursors] = useState<(string | null)[]>([]);
@@ -52,9 +52,7 @@ const PaidChargesTable: React.FC = () => {
 
       const url = new URL('/api/payments/charges', window.location.origin);
       url.searchParams.set('limit', String(pageSize));
-      if (cursor) {
-        url.searchParams.set('page', cursor);
-      }
+      if (cursor) url.searchParams.set('page', cursor);
 
       const res = await fetch(url.toString());
       const json: PaidChargesApiResponse = await res.json();
@@ -73,7 +71,6 @@ const PaidChargesTable: React.FC = () => {
     }
   };
 
-  // Initial load
   useEffect(() => {
     fetchPage(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -88,10 +85,8 @@ const PaidChargesTable: React.FC = () => {
 
   const handlePrevious = async () => {
     if (previousCursors.length === 0) return;
-
     const newHistory = [...previousCursors];
     const prevCursor = newHistory.pop() || null;
-
     setPreviousCursors(newHistory);
     setCurrentPageCursor(prevCursor);
     await fetchPage(prevCursor);
@@ -100,9 +95,22 @@ const PaidChargesTable: React.FC = () => {
   const formatAmount = (amount: number, currency: string) =>
     `${amount.toFixed(2)} ${currency.toUpperCase()}`;
 
+  // US format: MM/DD/YYYY hh:mm AM/PM
   const formatDate = (ts: number) => {
     const d = new Date(ts * 1000);
-    return d.toLocaleString();
+
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const year = d.getFullYear();
+
+    let hours = d.getHours();
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    if (hours === 0) hours = 12;
+    const hoursStr = String(hours).padStart(2, '0');
+
+    return `${month}/${day}/${year} ${hoursStr}:${minutes} ${ampm}`;
   };
 
   return (
@@ -115,7 +123,7 @@ const PaidChargesTable: React.FC = () => {
               Paid Payments History
             </h1>
             <p className="text-sm text-slate-600">
-              List of all successful Stripe charges (status:&nbsp;
+              List of all successful Stripe charges (status:{' '}
               <span className="font-semibold text-emerald-600">succeeded</span>).
             </p>
           </div>
@@ -127,7 +135,6 @@ const PaidChargesTable: React.FC = () => {
 
         {/* Card */}
         <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-4 md:p-5 space-y-4">
-          {/* Status / error */}
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2">
               {error}
