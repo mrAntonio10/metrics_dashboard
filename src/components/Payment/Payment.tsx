@@ -35,7 +35,7 @@ interface Product {
 }
 
 interface PaymentData {
-  amount: string; // stored as a string; normalized before sending
+  amount: string; // decimal string; normalized before sending
   description: string;
   customerEmail: string;
   customerName: string;
@@ -86,12 +86,12 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const stripe = useStripe();
   const elements = useElements();
 
-  const [clientSecret, setClientSecret] = useState<string>('');
-  const [loadingIntent, setLoadingIntent] = useState<boolean>(false);
-  const [processing, setProcessing] = useState<boolean>(false);
-  const [paymentError, setPaymentError] = useState<string>('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [loadingIntent, setLoadingIntent] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [paymentError, setPaymentError] = useState('');
 
-  // Helper to normalize to decimal number
+  // Normalize amount -> number
   const getNormalizedAmount = (): number => {
     const raw = String(paymentData.amount).trim().replace(',', '.');
     const n = Number(raw);
@@ -101,6 +101,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   // Create PaymentIntent when billing details + amount are ready
   useEffect(() => {
     const normalized = getNormalizedAmount();
+
     const canCreate =
       !!paymentData.customerEmail &&
       !!paymentData.customerName &&
@@ -117,10 +118,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amount: normalized, // decimal; backend converts to cents
+            amount: normalized, // decimal; backend will *100 -> cents
             customerEmail: paymentData.customerEmail,
             customerName: paymentData.customerName,
-            description: paymentData.description,
+            description: paymentData.description || 'Custom payment',
           }),
         });
 
@@ -187,7 +188,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     } else if (paymentIntent?.status === 'succeeded') {
       onSuccess({
         paymentIntentId: paymentIntent.id,
-        amount: paymentIntent.amount / 100, // back to dollars
+        amount: paymentIntent.amount / 100, // convert back to dollars
         currency: paymentIntent.currency,
         status: 'success',
       });
@@ -201,7 +202,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     setProcessing(false);
   };
 
-  // Display amount in the button
+  // Amount to show on the button
   const displayAmount = (() => {
     const n = getNormalizedAmount();
     if (n > 0) return n.toFixed(2);
@@ -219,8 +220,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         </div>
         <p className="mt-2 text-xs text-slate-500 flex items-center gap-1">
           <Shield className="w-3 h-3 text-emerald-500" />
-          Your card details are processed securely by Stripe and never stored on our
-          servers.
+          Your card details are processed securely by Stripe and never stored on
+          our servers.
         </p>
       </div>
 
@@ -272,7 +273,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 // ===== Main Payment Component =====
 
 const Payment: React.FC = () => {
-  const [currentStep, setCurrentStep] = useState<number>(1);
+  const [currentStep, setCurrentStep] = useState(1);
   const [paymentData, setPaymentData] = useState<PaymentData>({
     amount: '',
     description: '',
@@ -335,13 +336,11 @@ const Payment: React.FC = () => {
       ...prev,
       amount: product.allowCustomAmount
         ? ''
-        : ((product.price ?? 0).toFixed(2)),
-      description: product.allowCustomAmount
-        ? ''
-        : product.name,
+        : (product.price ?? 0).toFixed(2), // fixed plans -> "19.00"
+      description: product.allowCustomAmount ? '' : product.name,
     }));
 
-
+    setErrors({});
     setCurrentStep(2);
   };
 
@@ -362,11 +361,14 @@ const Payment: React.FC = () => {
     const parsedAmount = Number(rawAmount);
 
     if (!rawAmount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
-      newErrors.amount = 'Enter a valid amount.';
+      newErrors.amount = 'Enter a valid amount (e.g. 149.00).';
     }
 
-    if (selectedProduct?.allowCustomAmount && !paymentData.description.trim()) {
-      newErrors.description = 'Description is required for custom payments.';
+    if (selectedProduct?.allowCustomAmount) {
+      if (!paymentData.description.trim()) {
+        newErrors.description =
+          'Description is required for custom payments.';
+      }
     }
 
     setErrors(newErrors);
@@ -396,11 +398,13 @@ const Payment: React.FC = () => {
     setErrors({});
   };
 
-  // Helper: show price/amount in sidebar
+  const isCustom = !!selectedProduct?.allowCustomAmount;
+
+  // Sidebar amount label
   const getSidebarAmountLabel = () => {
     if (!selectedProduct) return null;
 
-    if (selectedProduct.allowCustomAmount) {
+    if (isCustom) {
       const normalized = Number(
         String(paymentData.amount).trim().replace(',', '.')
       );
@@ -413,8 +417,6 @@ const Payment: React.FC = () => {
     const price = selectedProduct.price ?? 0;
     return `$${price.toFixed(2)}`;
   };
-
-  const isCustom = !!selectedProduct?.allowCustomAmount;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-indigo-50">
@@ -459,8 +461,8 @@ const Payment: React.FC = () => {
                           completed
                             ? 'bg-emerald-500 text-white'
                             : active
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-slate-100 text-slate-500',
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-100 text-slate-500',
                         ].join(' ')}
                       >
                         {completed ? (
@@ -474,8 +476,8 @@ const Payment: React.FC = () => {
                           active
                             ? 'text-blue-700'
                             : completed
-                              ? 'text-slate-500'
-                              : 'text-slate-400'
+                            ? 'text-slate-500'
+                            : 'text-slate-400'
                         }
                       >
                         {step.label}
@@ -552,7 +554,7 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {/* Step 2: customer details + custom amount if needed */}
+            {/* Step 2: billing details + custom amount */}
             {currentStep === 2 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
@@ -569,6 +571,7 @@ const Payment: React.FC = () => {
                     if (validateStep2()) setCurrentStep(3);
                   }}
                 >
+                  {/* Full name */}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">
                       Full name *
@@ -595,6 +598,7 @@ const Payment: React.FC = () => {
                     )}
                   </div>
 
+                  {/* Email */}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">
                       Work email *
@@ -621,8 +625,39 @@ const Payment: React.FC = () => {
                     )}
                   </div>
 
+                  {/* Custom-specific fields */}
                   {isCustom && (
                     <>
+                      {/* Amount */}
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Amount (USD) *
+                        </label>
+                        <div className="relative">
+                          <DollarSign className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                          <input
+                            type="number"
+                            min="1"
+                            step="0.01"
+                            value={paymentData.amount}
+                            onChange={(e) =>
+                              setPaymentData({
+                                ...paymentData,
+                                amount: e.target.value,
+                              })
+                            }
+                            className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="e.g. 149.00"
+                          />
+                        </div>
+                        {errors.amount && (
+                          <p className="text-xs text-red-500 mt-1">
+                            {errors.amount}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Description */}
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">
                           Description *
@@ -648,15 +683,11 @@ const Payment: React.FC = () => {
                     </>
                   )}
 
-                  {!isCustom && (
-                    <>
-                      {/* Hidden but validated by preset amount */}
-                      {errors.amount && (
-                        <p className="text-xs text-red-500 mt-1">
-                          {errors.amount}
-                        </p>
-                      )}
-                    </>
+                  {/* For fixed plans just show validation error if something broke */}
+                  {!isCustom && errors.amount && (
+                    <p className="text-xs text-red-500 mt-1">
+                      {errors.amount}
+                    </p>
                   )}
 
                   <div className="flex items-center justify-between gap-3 pt-2">
