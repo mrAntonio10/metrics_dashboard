@@ -74,7 +74,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ paymentData, onSuccess, onErr
   useEffect(() => {
     const createPaymentIntent = async () => {
       try {
-        const response = await fetch('/api/payments/create-intent', {
+        const response = await fetch('/api/payments/create-intents', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
