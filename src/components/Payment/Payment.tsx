@@ -21,9 +21,8 @@ import {
   User,
   Mail,
 } from 'lucide-react';
-import { ProtectedComponent } from '@/hooks/use-permission';
 
-// ==== Types ====
+// ===== Types =====
 
 interface Product {
   id: number;
@@ -56,7 +55,7 @@ interface PaymentFormProps {
   onBack: () => void;
 }
 
-// ==== Stripe CardElement config ====
+// ===== Stripe CardElement config =====
 
 const cardElementOptions = {
   style: {
@@ -64,7 +63,8 @@ const cardElementOptions = {
       fontSize: '16px',
       color: '#111827',
       '::placeholder': { color: '#9CA3AF' },
-      fontFamily: '"Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+      fontFamily:
+        '"Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
       fontSmoothing: 'antialiased',
     },
     invalid: {
@@ -74,7 +74,7 @@ const cardElementOptions = {
   hidePostalCode: true,
 };
 
-// ==== PaymentForm: Step 3 (Stripe) ====
+// ===== Step 3: Payment form (Stripe) =====
 
 const PaymentForm: React.FC<PaymentFormProps> = ({
   paymentData,
@@ -90,7 +90,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [processing, setProcessing] = useState<boolean>(false);
   const [paymentError, setPaymentError] = useState<string>('');
 
-  // Crea PaymentIntent cuando hay datos completos
+  // Create PaymentIntent when billing details are ready
   useEffect(() => {
     const canCreate =
       paymentData.amount &&
@@ -115,16 +115,19 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           }),
         });
 
-
         const data = await response.json();
 
         if (response.ok && data?.clientSecret) {
           setClientSecret(data.clientSecret);
         } else {
-          setPaymentError(data?.error || 'No se pudo iniciar el pago.');
+          setPaymentError(
+            data?.error || 'Unable to initialize the payment. Please try again.'
+          );
         }
       } catch (err) {
-        setPaymentError('Error de conexión al iniciar el pago.');
+        setPaymentError(
+          'Network error while initializing the payment. Please try again.'
+        );
       } finally {
         setLoadingIntent(false);
       }
@@ -142,7 +145,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 
     const cardElement = elements.getElement(CardElement);
     if (!cardElement) {
-      setPaymentError('No se pudo cargar el formulario de tarjeta.');
+      setPaymentError('Could not load the card form. Please refresh and try again.');
       setProcessing(false);
       return;
     }
@@ -161,7 +164,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     );
 
     if (error) {
-      const msg = error.message || 'Error procesando el pago.';
+      const msg = error.message || 'An error occurred while processing your payment.';
       setPaymentError(msg);
       onError(msg);
     } else if (paymentIntent?.status === 'succeeded') {
@@ -172,7 +175,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         status: 'success',
       });
     } else {
-      const msg = 'No se pudo completar el pago.';
+      const msg =
+        'We could not complete your payment. No charges have been made. Please try again.';
       setPaymentError(msg);
       onError(msg);
     }
@@ -184,14 +188,15 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     <form onSubmit={handleSubmit} className="space-y-5">
       <div>
         <label className="block text-sm font-medium text-slate-700 mb-2">
-          Información de la tarjeta
+          Card details
         </label>
         <div className="border border-slate-200 rounded-xl px-4 py-3 bg-white shadow-sm focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition">
           <CardElement options={cardElementOptions} />
         </div>
         <p className="mt-2 text-xs text-slate-500 flex items-center gap-1">
           <Shield className="w-3 h-3 text-emerald-500" />
-          Tus datos se procesan de forma segura por Stripe. No se almacenan en nuestros servidores.
+          Your card details are processed securely by Stripe and never stored on our
+          servers.
         </p>
       </div>
 
@@ -210,33 +215,28 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           disabled={processing}
         >
           <ArrowLeft className="w-4 h-4 mr-1.5" />
-          Volver
+          Back
         </button>
 
         <button
           type="submit"
-          disabled={
-            !stripe ||
-            !clientSecret ||
-            processing ||
-            loadingIntent
-          }
+          disabled={!stripe || !clientSecret || processing || loadingIntent}
           className="flex-1 inline-flex items-center justify-center px-5 py-2.5 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold shadow-md hover:from-blue-700 hover:to-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
         >
           {processing ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Procesando pago...
+              Processing payment...
             </>
           ) : loadingIntent ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Preparando pago...
+              Preparing payment...
             </>
           ) : (
             <>
               <CreditCard className="w-4 h-4 mr-2" />
-              Confirmar y pagar ${paymentData.amount}
+              Confirm & pay ${paymentData.amount}
             </>
           )}
         </button>
@@ -245,7 +245,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   );
 };
 
-// ==== Main Payment Component ====
+// ===== Main Payment Component =====
 
 const Payment: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<number>(1);
@@ -267,29 +267,35 @@ const Payment: React.FC = () => {
       id: 1,
       name: 'Starter',
       price: 19,
-      description: 'Para proyectos personales o pruebas.',
-      features: ['Hasta 3 organizaciones', 'Reportes básicos', 'Soporte por email'],
+      description: 'For small teams and early-stage projects.',
+      features: ['Up to 3 organizations', 'Core reports', 'Email support'],
     },
     {
       id: 2,
       name: 'Growth',
       price: 49,
-      description: 'Ideal para equipos en crecimiento.',
-      features: ['Organizaciones ilimitadas', 'Métricas avanzadas', 'Prioridad en soporte'],
+      description: 'Best for growing teams that need visibility.',
+      features: [
+        'Unlimited organizations',
+        'Advanced analytics',
+        'Priority support',
+      ],
       highlight: true,
     },
     {
       id: 3,
       name: 'Enterprise',
       price: 99,
-      description: 'Para operaciones críticas y multi-tenant.',
-      features: ['SLA dedicado', 'Onboarding guiado', 'Integraciones avanzadas'],
+      description: 'Designed for mission-critical multi-tenant environments.',
+      features: [
+        'Dedicated SLA',
+        'Guided onboarding',
+        'Advanced integrations',
+      ],
     },
   ];
 
-  const goToStep = (step: number) => {
-    setCurrentStep(step);
-  };
+  const goToStep = (step: number) => setCurrentStep(step);
 
   const handleProductSelect = (product: Product) => {
     setSelectedProduct(product);
@@ -305,17 +311,17 @@ const Payment: React.FC = () => {
     const newErrors: Record<string, string> = {};
 
     if (!paymentData.customerName.trim()) {
-      newErrors.customerName = 'El nombre es requerido.';
+      newErrors.customerName = 'Full name is required.';
     }
 
     if (!paymentData.customerEmail.trim()) {
-      newErrors.customerEmail = 'El email es requerido.';
+      newErrors.customerEmail = 'Email is required.';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentData.customerEmail)) {
-      newErrors.customerEmail = 'Ingresa un email válido.';
+      newErrors.customerEmail = 'Enter a valid email address.';
     }
 
     if (!paymentData.amount || parseFloat(paymentData.amount) <= 0) {
-      newErrors.amount = 'Selecciona un plan antes de continuar.';
+      newErrors.amount = 'Please select a plan before continuing.';
     }
 
     setErrors(newErrors);
@@ -352,29 +358,30 @@ const Payment: React.FC = () => {
         <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">
-              Portal de Pagos Seguros
+              Secure Payments Portal
             </h1>
             <p className="text-sm text-slate-600">
-              Gestiona tu suscripción de Aggregate Insights con pagos protegidos por Stripe.
+              Manage your Aggregate Insights subscription with payments powered
+              by Stripe.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <Shield className="w-4 h-4 text-emerald-500" />
-            <span>PCI-DSS compliant • Datos encriptados end-to-end</span>
+            <span>PCI-DSS compliant • End-to-end encrypted</span>
           </div>
         </div>
 
-        {/* Layout principal */}
+        {/* Main layout */}
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)] gap-6 items-start">
-          {/* Card principal izquierda */}
+          {/* Left: wizard card */}
           <div className="bg-white rounded-2xl shadow-lg p-6 md:p-7 space-y-6 border border-slate-100">
             {/* Stepper */}
             <div className="flex items-center gap-3 text-xs font-medium text-slate-600 mb-1">
               {[
                 { id: 1, label: 'Plan' },
-                { id: 2, label: 'Datos' },
-                { id: 3, label: 'Pago' },
-                { id: 4, label: 'Confirmación' },
+                { id: 2, label: 'Details' },
+                { id: 3, label: 'Payment' },
+                { id: 4, label: 'Confirmation' },
               ].map((step, index) => {
                 const active = currentStep === step.id;
                 const completed = currentStep > step.id;
@@ -387,19 +394,23 @@ const Payment: React.FC = () => {
                           completed
                             ? 'bg-emerald-500 text-white'
                             : active
-                              ? 'bg-blue-600 text-white'
-                              : 'bg-slate-100 text-slate-500',
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-100 text-slate-500',
                         ].join(' ')}
                       >
-                        {completed ? <CheckCircle className="w-3 h-3" /> : step.id}
+                        {completed ? (
+                          <CheckCircle className="w-3 h-3" />
+                        ) : (
+                          step.id
+                        )}
                       </div>
                       <span
                         className={
                           active
                             ? 'text-blue-700'
                             : completed
-                              ? 'text-slate-500'
-                              : 'text-slate-400'
+                            ? 'text-slate-500'
+                            : 'text-slate-400'
                         }
                       >
                         {step.label}
@@ -413,14 +424,15 @@ const Payment: React.FC = () => {
               })}
             </div>
 
-            {/* Step 1: seleccionar plan */}
+            {/* Step 1: select plan */}
             {currentStep === 1 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Elige el plan que se ajusta a tu operación
+                  Choose the plan that fits your team
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Puedes cambiar o cancelar tu plan en cualquier momento.
+                  You can upgrade, downgrade, or cancel your subscription at any
+                  time.
                 </p>
                 <div className="grid gap-4 sm:grid-cols-3">
                   {products.map((p) => (
@@ -436,7 +448,7 @@ const Payment: React.FC = () => {
                     >
                       {p.highlight && (
                         <span className="absolute -top-2 right-3 px-2 py-0.5 bg-blue-600 text-[9px] text-white rounded-full">
-                          Más elegido
+                          Most popular
                         </span>
                       )}
                       <div className="flex items-center gap-2">
@@ -448,7 +460,7 @@ const Payment: React.FC = () => {
                       <div className="text-2xl font-semibold text-slate-900">
                         ${p.price}
                         <span className="text-xs font-normal text-slate-500">
-                          /mes
+                          /month
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-600">
@@ -456,7 +468,10 @@ const Payment: React.FC = () => {
                       </p>
                       <ul className="space-y-1 text-[10px] text-slate-500">
                         {p.features?.map((f) => (
-                          <li key={f} className="flex items-center gap-1.5">
+                          <li
+                            key={f}
+                            className="flex items-center gap-1.5"
+                          >
                             <CheckCircle className="w-3 h-3 text-emerald-500" />
                             <span>{f}</span>
                           </li>
@@ -468,14 +483,15 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {/* Step 2: datos del cliente */}
+            {/* Step 2: customer details */}
             {currentStep === 2 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Datos de facturación
+                  Billing details
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Usaremos esta información para tu recibo y notificaciones del pago.
+                  We’ll use this information for your receipt and payment
+                  notifications.
                 </p>
                 <form
                   className="space-y-4 max-w-lg"
@@ -486,7 +502,7 @@ const Payment: React.FC = () => {
                 >
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Nombre completo *
+                      Full name *
                     </label>
                     <div className="relative">
                       <User className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -500,7 +516,7 @@ const Payment: React.FC = () => {
                           })
                         }
                         className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="Ej: Marco Roca"
+                        placeholder="e.g. Jane Doe"
                       />
                     </div>
                     {errors.customerName && (
@@ -512,7 +528,7 @@ const Payment: React.FC = () => {
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Correo electrónico *
+                      Work email *
                     </label>
                     <div className="relative">
                       <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -526,7 +542,7 @@ const Payment: React.FC = () => {
                           })
                         }
                         className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="tucorreo@empresa.com"
+                        placeholder="you@company.com"
                       />
                     </div>
                     {errors.customerEmail && (
@@ -543,14 +559,14 @@ const Payment: React.FC = () => {
                       className="inline-flex items-center text-xs text-slate-500 hover:text-slate-700"
                     >
                       <ArrowLeft className="w-3 h-3 mr-1" />
-                      Cambiar plan
+                      Change plan
                     </button>
 
                     <button
                       type="submit"
                       className="inline-flex items-center px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition"
                     >
-                      Continuar al pago
+                      Continue to payment
                       <ArrowRight className="w-4 h-4 ml-1.5" />
                     </button>
                   </div>
@@ -558,20 +574,21 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {/* Step 3: pago con Stripe */}
+            {/* Step 3: payment */}
             {currentStep === 3 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Completar pago
+                  Complete your payment
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Ingresa los datos de tu tarjeta. No almacenamos esta información.
+                  Enter your card details. We do not store this information.
                 </p>
 
                 {pkMissing ? (
                   <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm rounded-lg px-3 py-2">
-                    Falta configurar <code>NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code>.
-                    Agrega tu clave pública de Stripe antes de habilitar pagos.
+                    <code>NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> is not
+                    configured. Add your Stripe publishable key to enable
+                    payments.
                   </div>
                 ) : (
                   <Elements stripe={stripePromise}>
@@ -586,7 +603,7 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {/* Step 4: confirmación */}
+            {/* Step 4: confirmation */}
             {currentStep === 4 && (
               <div className="space-y-5 text-center">
                 {paymentResult?.status === 'success' ? (
@@ -595,17 +612,19 @@ const Payment: React.FC = () => {
                       <CheckCircle className="w-7 h-7" />
                     </div>
                     <h2 className="text-xl font-semibold text-slate-900">
-                      Pago realizado con éxito
+                      Payment successful
                     </h2>
                     <p className="text-sm text-slate-600 max-w-md mx-auto">
-                      Hemos procesado tu pago de{' '}
+                      We’ve processed your payment of{' '}
                       <span className="font-semibold">
-                        ${paymentResult.amount} {paymentResult.currency?.toUpperCase()}
-                      </span>. Recibirás un comprobante en tu correo.
+                        ${paymentResult.amount}{' '}
+                        {paymentResult.currency?.toUpperCase()}
+                      </span>
+                      . A receipt will be sent to your email.
                     </p>
                     {paymentResult.paymentIntentId && (
                       <p className="text-[10px] text-slate-400">
-                        ID de transacción: {paymentResult.paymentIntentId}
+                        Transaction ID: {paymentResult.paymentIntentId}
                       </p>
                     )}
                   </>
@@ -615,11 +634,11 @@ const Payment: React.FC = () => {
                       <XCircle className="w-7 h-7" />
                     </div>
                     <h2 className="text-xl font-semibold text-slate-900">
-                      No se pudo completar el pago
+                      Payment could not be completed
                     </h2>
                     <p className="text-sm text-slate-600 max-w-md mx-auto">
                       {paymentResult?.error ||
-                        'Ocurrió un problema al procesar tu pago. Puedes intentar nuevamente.'}
+                        'Something went wrong while processing your payment. No charges were made.'}
                     </p>
                   </>
                 )}
@@ -629,23 +648,23 @@ const Payment: React.FC = () => {
                   className="mt-3 inline-flex items-center px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-lg hover:from-blue-700 hover:to-indigo-700 transition"
                 >
                   {paymentResult?.status === 'success'
-                    ? 'Realizar otro pago'
-                    : 'Intentar nuevamente'}
+                    ? 'Make another payment'
+                    : 'Try again'}
                 </button>
               </div>
             )}
           </div>
 
-          {/* Sidebar / Resumen derecha */}
+          {/* Right: summary sidebar */}
           <aside className="bg-white/80 backdrop-blur-sm border border-slate-100 rounded-2xl shadow-md p-5 space-y-4">
             <h3 className="text-sm font-semibold text-slate-900">
-              Resumen de tu suscripción
+              Subscription summary
             </h3>
             {selectedProduct ? (
               <>
                 <div className="flex items-baseline justify-between">
                   <div>
-                    <p className="text-xs text-slate-500">Plan seleccionado</p>
+                    <p className="text-xs text-slate-500">Selected plan</p>
                     <p className="text-sm font-semibold text-slate-900">
                       {selectedProduct.name}
                     </p>
@@ -654,7 +673,7 @@ const Payment: React.FC = () => {
                     <p className="text-xl font-semibold text-slate-900">
                       ${selectedProduct.price}
                     </p>
-                    <p className="text-[10px] text-slate-500">USD / mes</p>
+                    <p className="text-[10px] text-slate-500">USD / month</p>
                   </div>
                 </div>
                 <ul className="mt-2 space-y-1.5 text-[10px] text-slate-600">
@@ -668,18 +687,19 @@ const Payment: React.FC = () => {
               </>
             ) : (
               <p className="text-xs text-slate-500">
-                Selecciona un plan para ver el detalle de tu suscripción.
+                Select a plan to see a breakdown of your subscription.
               </p>
             )}
 
             <div className="border-t border-slate-100 pt-3 space-y-1">
               <p className="flex items-center gap-2 text-[10px] text-slate-500">
                 <Shield className="w-3 h-3 text-emerald-500" />
-                Procesado con Stripe. No almacenamos los datos de tu tarjeta.
+                Payments are processed by Stripe. We never store your card
+                details.
               </p>
               <p className="text-[10px] text-slate-400">
-                Al continuar aceptas los Términos de servicio y la Política de privacidad de la
-                plataforma.
+                By continuing, you agree to the platform’s Terms of Service and
+                Privacy Policy.
               </p>
             </div>
           </aside>
