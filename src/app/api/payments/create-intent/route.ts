@@ -1,4 +1,3 @@
-// src/app/api/payments/create-intent/route.ts
 import Stripe from 'stripe';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
@@ -38,9 +37,7 @@ export async function POST(req: Request) {
       currency: 'usd',
       description: description || 'Pago de suscripción',
       receipt_email: customerEmail,
-      metadata: {
-        customerName,
-      },
+      metadata: { customerName },
       automatic_payment_methods: { enabled: true },
     });
 
