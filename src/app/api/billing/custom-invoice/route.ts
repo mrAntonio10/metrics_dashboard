@@ -1,4 +1,3 @@
-// src/app/api/billing/custom-invoice/route.ts
 import { NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
@@ -6,8 +5,7 @@ import path from 'path';
 const TENANTS_DIR = process.env.TENANTS_DIR || '/data/vivace-vivace-api';
 const ENV_PREFIX = '.env.';
 
-// 🔴 Ignora BILLING_WEBHOOK viejo si está mal configurado
-// Asegúrate que este URL coincide EXACTO con el "Production URL" del Webhook node en n8n.
+// Usa SIEMPRE el Production URL del webhook de n8n
 const BILLING_WEBHOOK =
   'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d';
 
@@ -74,7 +72,6 @@ function renderCustomHTML(opts: {
   amount: number;
   currency: string;
   customerName: string;
-  customerEmail: string;
   paymentIntentId?: string;
 }) {
   const {
@@ -83,7 +80,6 @@ function renderCustomHTML(opts: {
     amount,
     currency,
     customerName,
-    customerEmail,
     paymentIntentId,
   } = opts;
 
@@ -121,7 +117,7 @@ function renderCustomHTML(opts: {
       <div class="amount">${esc(amt)} <span class="currency">${esc(currency)}</span></div>
 
       <div class="label">Billed to</div>
-      <div class="value">${esc(customerName)} &lt;${esc(customerEmail)}&gt;</div>
+      <div class="value">${esc(customerName || 'Client')}</div>
 
       ${
         paymentIntentId
@@ -130,7 +126,7 @@ function renderCustomHTML(opts: {
       }
 
       <p class="muted">
-        This email confirms your custom payment. If you did not authorize this transaction or have questions, please reply directly to this message.
+        This email confirms your custom payment request. If you have questions, please reply directly to this message.
       </p>
     </div>
   </div>
@@ -153,17 +149,16 @@ export async function POST(req: Request) {
       amount,
       currency = 'USD',
       description,
-      customerEmail,
       customerName,
+      customerEmail, // opcional (por si en algún flujo lo envías)
       paymentIntentId,
     } = body || {};
 
-    if (!tenantId || !amount || !customerEmail || !customerName) {
+    if (!tenantId || !amount) {
       return NextResponse.json(
         {
           error: true,
-          message:
-            'Missing required fields: tenantId, amount, customerEmail, customerName',
+          message: 'Missing required fields: tenantId, amount',
         },
         { status: 400 },
       );
@@ -196,8 +191,7 @@ export async function POST(req: Request) {
       description,
       amount: numericAmount,
       currency,
-      customerEmail,
-      customerName,
+      customerName: customerName || '',
       paymentIntentId,
     });
 
@@ -208,14 +202,25 @@ export async function POST(req: Request) {
 
     const DETAIL = `Custom payment for tenant=${tenant.tenantId}, PI=${paymentIntentId || 'n/a'}`;
 
+    const tenantEmails = tenant.invoiceEmails || [];
+    const fallbackEmail =
+      typeof customerEmail === 'string' && customerEmail.trim()
+        ? customerEmail.trim()
+        : '';
+
     const TO_EMAIL =
-      (tenant.invoiceEmails && tenant.invoiceEmails.join(',')) ||
-      customerEmail;
+      (tenantEmails.length ? tenantEmails.join(',') : '') ||
+      fallbackEmail ||
+      '';
 
     const recipients = (
-      tenant.invoiceEmails?.length
-        ? [...tenant.invoiceEmails, customerEmail]
-        : [customerEmail]
+      tenantEmails.length
+        ? fallbackEmail && !tenantEmails.includes(fallbackEmail)
+          ? [...tenantEmails, fallbackEmail]
+          : tenantEmails
+        : fallbackEmail
+        ? [fallbackEmail]
+        : []
     ).filter((v, i, arr) => arr.indexOf(v) === i);
 
     const payload = {

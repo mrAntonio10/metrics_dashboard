@@ -1,4 +1,3 @@
-// src/components/Payment/Payment.tsx
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -19,21 +18,18 @@ import {
   ArrowRight,
   DollarSign,
   User,
-  Mail,
 } from 'lucide-react';
 
-/* =========================
-   Types
-   ========================= */
+/* Types */
 
 interface Product {
   id: number;
   name: string;
-  price?: number; // for fixed plans
+  price?: number;
   description: string;
   features?: string[];
   highlight?: boolean;
-  allowCustomAmount?: boolean; // true => "Custom"
+  allowCustomAmount?: boolean;
 }
 
 interface TenantSummary {
@@ -42,11 +38,11 @@ interface TenantSummary {
 }
 
 interface PaymentData {
-  amount: string; // decimal string
+  amount: string;
   description: string;
-  customerEmail: string;
+  customerEmail: string; // usado solo en suscripciones
   customerName: string;
-  tenantId?: string; // used only for custom payments
+  tenantId?: string;
 }
 
 interface PaymentResult {
@@ -64,9 +60,7 @@ interface PaymentFormProps {
   onBack: () => void;
 }
 
-/* =========================
-   Stripe CardElement config
-   ========================= */
+/* Stripe CardElement config */
 
 const cardElementOptions: any = {
   style: {
@@ -85,10 +79,7 @@ const cardElementOptions: any = {
   hidePostalCode: true,
 };
 
-/* =========================
-   Step 3: Card payment form
-   (only for non-custom plans)
-   ========================= */
+/* Step 3: Card payment form (solo suscripciones) */
 
 const PaymentForm: React.FC<PaymentFormProps> = ({
   paymentData,
@@ -110,7 +101,6 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     return Number.isFinite(n) ? n : 0;
   };
 
-  // Create PaymentIntent when data ready
   useEffect(() => {
     const normalized = getNormalizedAmount();
     const canCreate =
@@ -129,7 +119,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amount: normalized, // backend hará *100
+            amount: normalized,
             customerEmail: paymentData.customerEmail,
             customerName: paymentData.customerName,
             description: paymentData.description || 'Subscription payment',
@@ -287,9 +277,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   );
 };
 
-/* =========================
-   Main Payment Component
-   ========================= */
+/* Main Payment component */
 
 const Payment: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -312,7 +300,6 @@ const Payment: React.FC = () => {
   const pk = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
   const pkMissing = !pk;
 
-  // Products
   const products: Product[] = [
     {
       id: 1,
@@ -326,11 +313,7 @@ const Payment: React.FC = () => {
       name: 'Growth',
       price: 49,
       description: 'Best for growing teams that need visibility.',
-      features: [
-        'Unlimited organizations',
-        'Advanced analytics',
-        'Priority support',
-      ],
+      features: ['Unlimited organizations', 'Advanced analytics', 'Priority support'],
       highlight: true,
     },
     {
@@ -355,7 +338,6 @@ const Payment: React.FC = () => {
 
   const isCustom = !!selectedProduct?.allowCustomAmount;
 
-  // Load tenants for Custom selector
   useEffect(() => {
     const loadTenants = async () => {
       try {
@@ -377,7 +359,6 @@ const Payment: React.FC = () => {
 
   const handleProductSelect = (product: Product) => {
     setSelectedProduct(product);
-
     setPaymentData((prev) => ({
       ...prev,
       amount: product.allowCustomAmount
@@ -386,7 +367,6 @@ const Payment: React.FC = () => {
       description: product.allowCustomAmount ? '' : product.name,
       tenantId: undefined,
     }));
-
     setErrors({});
     setCurrentStep(2);
   };
@@ -398,12 +378,15 @@ const Payment: React.FC = () => {
       newErrors.customerName = 'Full name is required.';
     }
 
-    if (!paymentData.customerEmail.trim()) {
-      newErrors.customerEmail = 'Email is required.';
-    } else if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentData.customerEmail)
-    ) {
-      newErrors.customerEmail = 'Enter a valid email address.';
+    // Email solo requerido para suscripciones (no Custom)
+    if (!isCustom) {
+      if (!paymentData.customerEmail.trim()) {
+        newErrors.customerEmail = 'Email is required.';
+      } else if (
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentData.customerEmail)
+      ) {
+        newErrors.customerEmail = 'Enter a valid email address.';
+      }
     }
 
     const rawAmount = String(paymentData.amount).trim().replace(',', '.');
@@ -427,14 +410,10 @@ const Payment: React.FC = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Custom flow:
-  // Step 2 button = "Send payment"
-  // Here we call backend, which invokes the n8n webhook and emails the pay link.
   const sendCustomPaymentRequest = async () => {
     const amountNum = Number(
       String(paymentData.amount).trim().replace(',', '.'),
     );
-
     setSendingCustom(true);
 
     try {
@@ -446,10 +425,7 @@ const Payment: React.FC = () => {
           amount: amountNum,
           currency: 'USD',
           description: paymentData.description,
-          customerEmail: paymentData.customerEmail,
           customerName: paymentData.customerName,
-          // En tu route del backend, desde aquí llamas al nodo:
-          // https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d
         }),
       });
 
@@ -463,7 +439,6 @@ const Payment: React.FC = () => {
         );
       }
 
-      // Mostramos pantalla de "success" (este success es del envío, no del cobro)
       setPaymentResult({
         status: 'success',
         amount: amountNum,
@@ -533,8 +508,7 @@ const Payment: React.FC = () => {
               Secure Payments Portal
             </h1>
             <p className="text-sm text-slate-600">
-              Manage your Aggregate Insights subscription or send custom payment
-              requests.
+              Manage your subscriptions or send custom payment requests.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -551,7 +525,10 @@ const Payment: React.FC = () => {
             <div className="flex items-center gap-3 text-xs font-medium text-slate-600 mb-1">
               {[
                 { id: 1, label: 'Plan' },
-                { id: 2, label: isCustom ? 'Details & send' : 'Details' },
+                {
+                  id: 2,
+                  label: isCustom ? 'Details & send' : 'Details',
+                },
                 { id: 3, label: 'Payment' },
                 { id: 4, label: 'Confirmation' },
               ].map((step, index) => {
@@ -605,7 +582,7 @@ const Payment: React.FC = () => {
                 <p className="text-sm text-slate-600">
                   Select a subscription plan to charge now, or use{' '}
                   <strong>Custom</strong> to send a one-time payment request via
-                  email.
+                  email to the tenant&apos;s billing contacts.
                 </p>
                 <div className="grid gap-4 sm:grid-cols-4">
                   {products.map((p) => (
@@ -657,7 +634,7 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {/* Step 2: billing details (+ custom send) */}
+            {/* Step 2: billing details */}
             {currentStep === 2 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
@@ -665,7 +642,7 @@ const Payment: React.FC = () => {
                 </h2>
                 <p className="text-sm text-slate-600">
                   {isCustom
-                    ? 'Fill in the details to send a secure payment request email.'
+                    ? 'Fill in the details to send a secure payment request to the selected tenant.'
                     : 'We’ll use this information for your receipt and payment notifications.'}
                 </p>
                 <form
@@ -675,10 +652,8 @@ const Payment: React.FC = () => {
                     if (!validateStep2()) return;
 
                     if (isCustom) {
-                      // Custom -> directly send payment request (no Step 3)
                       await sendCustomPaymentRequest();
                     } else {
-                      // Subscription -> go to card payment
                       setCurrentStep(3);
                     }
                   }}
@@ -710,32 +685,34 @@ const Payment: React.FC = () => {
                     )}
                   </div>
 
-                  {/* Email */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Work email *
-                    </label>
-                    <div className="relative">
-                      <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                      <input
-                        type="email"
-                        value={paymentData.customerEmail}
-                        onChange={(e) =>
-                          setPaymentData({
-                            ...paymentData,
-                            customerEmail: e.target.value,
-                          })
-                        }
-                        className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="you@company.com"
-                      />
+                  {/* Email - SOLO para suscripciones */}
+                  {!isCustom && (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Work email *
+                      </label>
+                      <div className="relative">
+                        {/* Re-using DollarSign would be weird; omit icon */}
+                        <input
+                          type="email"
+                          value={paymentData.customerEmail}
+                          onChange={(e) =>
+                            setPaymentData({
+                              ...paymentData,
+                              customerEmail: e.target.value,
+                            })
+                          }
+                          className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          placeholder="you@company.com"
+                        />
+                      </div>
+                      {errors.customerEmail && (
+                        <p className="text-xs text-red-500 mt-1">
+                          {errors.customerEmail}
+                        </p>
+                      )}
                     </div>
-                    {errors.customerEmail && (
-                      <p className="text-xs text-red-500 mt-1">
-                        {errors.customerEmail}
-                      </p>
-                    )}
-                  </div>
+                  )}
 
                   {/* Custom-specific fields */}
                   {isCustom && (
@@ -829,7 +806,7 @@ const Payment: React.FC = () => {
                     </>
                   )}
 
-                  {/* For fixed plans: readonly amount (already set) */}
+                  {/* Fixed plans: readonly amount */}
                   {!isCustom && (
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1">
@@ -844,6 +821,11 @@ const Payment: React.FC = () => {
                           className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-100 bg-slate-50 text-sm text-slate-500"
                         />
                       </div>
+                      {errors.amount && (
+                        <p className="text-xs text-red-500 mt-1">
+                          {errors.amount}
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -864,19 +846,17 @@ const Payment: React.FC = () => {
                       className="inline-flex items-center px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       {isCustom ? (
-                        <>
-                          {sendingCustom ? (
-                            <>
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                              Sending payment...
-                            </>
-                          ) : (
-                            <>
-                              Send payment
-                              <ArrowRight className="w-4 h-4 ml-1.5" />
-                            </>
-                          )}
-                        </>
+                        sendingCustom ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Sending payment...
+                          </>
+                        ) : (
+                          <>
+                            Send payment
+                            <ArrowRight className="w-4 h-4 ml-1.5" />
+                          </>
+                        )
                       ) : (
                         <>
                           Continue to payment
@@ -889,7 +869,7 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {/* Step 3: card payment (only non-custom) */}
+            {/* Step 3: card payment (solo si no es custom) */}
             {currentStep === 3 && !isCustom && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
@@ -934,11 +914,11 @@ const Payment: React.FC = () => {
                     <p className="text-sm text-slate-600 max-w-md mx-auto">
                       {isCustom ? (
                         <>
-                          We&apos;ve sent a secure payment link for{' '}
+                          We&apos;ve sent a secure payment request for{' '}
                           <span className="font-semibold">
                             ${paymentResult.amount?.toFixed(2)} USD
                           </span>{' '}
-                          to the provided email.
+                          to the billing contacts configured for this tenant.
                         </>
                       ) : (
                         <>
