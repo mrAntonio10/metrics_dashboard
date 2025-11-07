@@ -6,9 +6,9 @@ import path from 'path';
 const TENANTS_DIR = process.env.TENANTS_DIR || '/data/vivace-vivace-api';
 const ENV_PREFIX = '.env.';
 
-// Webhook fijo que mencionaste
+// 🔴 Ignora BILLING_WEBHOOK viejo si está mal configurado
+// Asegúrate que este URL coincide EXACTO con el "Production URL" del Webhook node en n8n.
 const BILLING_WEBHOOK =
-  process.env.BILLING_WEBHOOK?.trim() ||
   'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d';
 
 function parseDotenv(text: string): Record<string, string> {
@@ -118,20 +118,14 @@ function renderCustomHTML(opts: {
       <div class="value">${esc(description || 'Custom payment')}</div>
 
       <div class="label">Amount</div>
-      <div class="amount">${esc(amt)} <span class="currency">${esc(
-        currency,
-      )}</span></div>
+      <div class="amount">${esc(amt)} <span class="currency">${esc(currency)}</span></div>
 
       <div class="label">Billed to</div>
-      <div class="value">${esc(customerName)} &lt;${esc(
-    customerEmail,
-  )}&gt;</div>
+      <div class="value">${esc(customerName)} &lt;${esc(customerEmail)}&gt;</div>
 
       ${
         paymentIntentId
-          ? `<div class="box">Stripe PaymentIntent ID: <strong>${esc(
-              paymentIntentId,
-            )}</strong></div>`
+          ? `<div class="box">Stripe PaymentIntent ID: <strong>${esc(paymentIntentId)}</strong></div>`
           : ''
       }
 
@@ -154,7 +148,6 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-
     const {
       tenantId,
       amount,
@@ -184,7 +177,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Resolve tenant
     let tenant;
     try {
       tenant = await findTenantEnv(tenantId);
@@ -209,7 +201,6 @@ export async function POST(req: Request) {
       paymentIntentId,
     });
 
-    // Attach HTML as file for n8n (compatible with tu flujo actual)
     const buf = Buffer.from(html, 'utf8');
     const FILE_BASE64 = buf.toString('base64');
     const FILE_NAME = `custom-payment-${tenant.companyKey}-${Date.now()}.html`;
