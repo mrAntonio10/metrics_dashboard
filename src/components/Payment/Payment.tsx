@@ -301,28 +301,28 @@ const Payment: React.FC = () => {
   const pkMissing = !pk;
 
   const products: Product[] = [
-    {
-      id: 1,
-      name: 'Starter',
-      price: 19,
-      description: 'For small teams and early-stage projects.',
-      features: ['Up to 3 organizations', 'Core reports', 'Email support'],
-    },
-    {
-      id: 2,
-      name: 'Growth',
-      price: 49,
-      description: 'Best for growing teams that need visibility.',
-      features: ['Unlimited organizations', 'Advanced analytics', 'Priority support'],
-      highlight: true,
-    },
-    {
-      id: 3,
-      name: 'Enterprise',
-      price: 99,
-      description: 'Designed for mission-critical multi-tenant environments.',
-      features: ['Dedicated SLA', 'Guided onboarding', 'Advanced integrations'],
-    },
+    // {
+    //   id: 1,
+    //   name: 'Starter',
+    //   price: 19,
+    //   description: 'For small teams and early-stage projects.',
+    //   features: ['Up to 3 organizations', 'Core reports', 'Email support'],
+    // },
+    // {
+    //   id: 2,
+    //   name: 'Growth',
+    //   price: 49,
+    //   description: 'Best for growing teams that need visibility.',
+    //   features: ['Unlimited organizations', 'Advanced analytics', 'Priority support'],
+    //   highlight: true,
+    // },
+    // {
+    //   id: 3,
+    //   name: 'Enterprise',
+    //   price: 99,
+    //   description: 'Designed for mission-critical multi-tenant environments.',
+    //   features: ['Dedicated SLA', 'Guided onboarding', 'Advanced integrations'],
+    // },
     {
       id: 4,
       name: 'Custom',
