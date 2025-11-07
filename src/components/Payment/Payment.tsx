@@ -33,7 +33,7 @@ interface Product {
   description: string;
   features?: string[];
   highlight?: boolean;
-  allowCustomAmount?: boolean; // true => custom
+  allowCustomAmount?: boolean; // true => "Custom"
 }
 
 interface TenantSummary {
@@ -42,7 +42,7 @@ interface TenantSummary {
 }
 
 interface PaymentData {
-  amount: string; // decimal string; normalized before sending
+  amount: string; // decimal string
   description: string;
   customerEmail: string;
   customerName: string;
@@ -59,7 +59,6 @@ interface PaymentResult {
 
 interface PaymentFormProps {
   paymentData: PaymentData;
-  selectedProduct: Product | null;
   onSuccess: (result: PaymentResult) => void;
   onError: (error: string) => void;
   onBack: () => void;
@@ -87,12 +86,12 @@ const cardElementOptions: any = {
 };
 
 /* =========================
-   Step 3: Payment form
+   Step 3: Card payment form
+   (only for non-custom plans)
    ========================= */
 
 const PaymentForm: React.FC<PaymentFormProps> = ({
   paymentData,
-  selectedProduct,
   onSuccess,
   onError,
   onBack,
@@ -133,7 +132,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             amount: normalized, // backend hará *100
             customerEmail: paymentData.customerEmail,
             customerName: paymentData.customerName,
-            description: paymentData.description || 'Custom payment',
+            description: paymentData.description || 'Subscription payment',
           }),
         });
 
@@ -205,35 +204,10 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     }
 
     if (paymentIntent?.status === 'succeeded') {
-      const amount = paymentIntent.amount / 100;
-      const currency = paymentIntent.currency;
-
-      // Si es custom + tenant seleccionado, avisamos al backend
-      if (selectedProduct?.allowCustomAmount && paymentData.tenantId) {
-        try {
-          await fetch('/api/billing/custom-invoice', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              tenantId: paymentData.tenantId,
-              amount,
-              currency,
-              description: paymentData.description || 'Custom payment',
-              customerEmail: paymentData.customerEmail,
-              customerName: paymentData.customerName,
-              paymentIntentId: paymentIntent.id,
-            }),
-          });
-        } catch (err) {
-          console.error('Error notifying n8n for custom invoice', err);
-          // no rompemos el éxito del cobro
-        }
-      }
-
       onSuccess({
         paymentIntentId: paymentIntent.id,
-        amount,
-        currency,
+        amount: paymentIntent.amount / 100,
+        currency: paymentIntent.currency,
         status: 'success',
       });
     } else {
@@ -326,11 +300,14 @@ const Payment: React.FC = () => {
     customerName: '',
     tenantId: undefined,
   });
-  const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(null);
+  const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(
+    null,
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(false);
+  const [sendingCustom, setSendingCustom] = useState(false);
 
   const pk = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
   const pkMissing = !pk;
@@ -366,7 +343,7 @@ const Payment: React.FC = () => {
     {
       id: 4,
       name: 'Custom',
-      description: 'Set a tailored one-time or special agreement amount.',
+      description: 'Send a one-time payment request with a custom amount.',
       features: [
         'Ideal for custom contracts',
         'Manual billing alignment',
@@ -450,6 +427,63 @@ const Payment: React.FC = () => {
     return Object.keys(newErrors).length === 0;
   };
 
+  // Custom flow:
+  // Step 2 button = "Send payment"
+  // Here we call backend, which invokes the n8n webhook and emails the pay link.
+  const sendCustomPaymentRequest = async () => {
+    const amountNum = Number(
+      String(paymentData.amount).trim().replace(',', '.'),
+    );
+
+    setSendingCustom(true);
+
+    try {
+      const res = await fetch('/api/billing/custom-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tenantId: paymentData.tenantId,
+          amount: amountNum,
+          currency: 'USD',
+          description: paymentData.description,
+          customerEmail: paymentData.customerEmail,
+          customerName: paymentData.customerName,
+          // En tu route del backend, desde aquí llamas al nodo:
+          // https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d
+        }),
+      });
+
+      const data = await res.json().catch(() => ({} as any));
+
+      if (!res.ok || data.error) {
+        throw new Error(
+          data.message ||
+            data.error ||
+            'Unable to send the payment request. Please try again.',
+        );
+      }
+
+      // Mostramos pantalla de "success" (este success es del envío, no del cobro)
+      setPaymentResult({
+        status: 'success',
+        amount: amountNum,
+        currency: 'USD',
+      });
+      setCurrentStep(4);
+    } catch (err: any) {
+      console.error('Error sending custom payment request', err);
+      setPaymentResult({
+        status: 'error',
+        error:
+          err?.message ||
+          'Unable to send the payment request. Please try again.',
+      });
+      setCurrentStep(4);
+    } finally {
+      setSendingCustom(false);
+    }
+  };
+
   const handlePaymentSuccess = (result: PaymentResult) => {
     setPaymentResult(result);
     setCurrentStep(4);
@@ -499,8 +533,8 @@ const Payment: React.FC = () => {
               Secure Payments Portal
             </h1>
             <p className="text-sm text-slate-600">
-              Manage your Aggregate Insights subscription with payments powered
-              by Stripe.
+              Manage your Aggregate Insights subscription or send custom payment
+              requests.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -517,7 +551,7 @@ const Payment: React.FC = () => {
             <div className="flex items-center gap-3 text-xs font-medium text-slate-600 mb-1">
               {[
                 { id: 1, label: 'Plan' },
-                { id: 2, label: 'Details' },
+                { id: 2, label: isCustom ? 'Details & send' : 'Details' },
                 { id: 3, label: 'Payment' },
                 { id: 4, label: 'Confirmation' },
               ].map((step, index) => {
@@ -566,11 +600,12 @@ const Payment: React.FC = () => {
             {currentStep === 1 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
-                  Choose the plan that fits your team
+                  Choose how you want to charge
                 </h2>
                 <p className="text-sm text-slate-600">
-                  You can upgrade, downgrade, or cancel your subscription at any
-                  time.
+                  Select a subscription plan to charge now, or use{' '}
+                  <strong>Custom</strong> to send a one-time payment request via
+                  email.
                 </p>
                 <div className="grid gap-4 sm:grid-cols-4">
                   {products.map((p) => (
@@ -622,21 +657,30 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {/* Step 2: billing details */}
+            {/* Step 2: billing details (+ custom send) */}
             {currentStep === 2 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
                   Billing details
                 </h2>
                 <p className="text-sm text-slate-600">
-                  We’ll use this information for your receipt and payment
-                  notifications.
+                  {isCustom
+                    ? 'Fill in the details to send a secure payment request email.'
+                    : 'We’ll use this information for your receipt and payment notifications.'}
                 </p>
                 <form
                   className="space-y-4 max-w-lg"
-                  onSubmit={(e) => {
+                  onSubmit={async (e) => {
                     e.preventDefault();
-                    if (validateStep2()) setCurrentStep(3);
+                    if (!validateStep2()) return;
+
+                    if (isCustom) {
+                      // Custom -> directly send payment request (no Step 3)
+                      await sendCustomPaymentRequest();
+                    } else {
+                      // Subscription -> go to card payment
+                      setCurrentStep(3);
+                    }
                   }}
                 >
                   {/* Full name */}
@@ -785,11 +829,22 @@ const Payment: React.FC = () => {
                     </>
                   )}
 
-                  {/* For fixed plans: show amount error if exists */}
-                  {!isCustom && errors.amount && (
-                    <p className="text-xs text-red-500 mt-1">
-                      {errors.amount}
-                    </p>
+                  {/* For fixed plans: readonly amount (already set) */}
+                  {!isCustom && (
+                    <div>
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Amount (USD)
+                      </label>
+                      <div className="relative">
+                        <DollarSign className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                        <input
+                          type="text"
+                          value={paymentData.amount}
+                          readOnly
+                          className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-100 bg-slate-50 text-sm text-slate-500"
+                        />
+                      </div>
+                    </div>
                   )}
 
                   <div className="flex items-center justify-between gap-3 pt-2">
@@ -797,6 +852,7 @@ const Payment: React.FC = () => {
                       type="button"
                       onClick={() => goToStep(1)}
                       className="inline-flex items-center text-xs text-slate-500 hover:text-slate-700"
+                      disabled={sendingCustom}
                     >
                       <ArrowLeft className="w-3 h-3 mr-1" />
                       Change plan
@@ -804,18 +860,37 @@ const Payment: React.FC = () => {
 
                     <button
                       type="submit"
-                      className="inline-flex items-center px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition"
+                      disabled={sendingCustom}
+                      className="inline-flex items-center px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      Continue to payment
-                      <ArrowRight className="w-4 h-4 ml-1.5" />
+                      {isCustom ? (
+                        <>
+                          {sendingCustom ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Sending payment...
+                            </>
+                          ) : (
+                            <>
+                              Send payment
+                              <ArrowRight className="w-4 h-4 ml-1.5" />
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          Continue to payment
+                          <ArrowRight className="w-4 h-4 ml-1.5" />
+                        </>
+                      )}
                     </button>
                   </div>
                 </form>
               </div>
             )}
 
-            {/* Step 3: payment */}
-            {currentStep === 3 && (
+            {/* Step 3: card payment (only non-custom) */}
+            {currentStep === 3 && !isCustom && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
                   Complete your payment
@@ -834,7 +909,6 @@ const Payment: React.FC = () => {
                   <Elements stripe={stripePromise}>
                     <PaymentForm
                       paymentData={paymentData}
-                      selectedProduct={selectedProduct}
                       onSuccess={handlePaymentSuccess}
                       onError={handlePaymentError}
                       onBack={() => setCurrentStep(2)}
@@ -853,17 +927,31 @@ const Payment: React.FC = () => {
                       <CheckCircle className="w-7 h-7" />
                     </div>
                     <h2 className="text-xl font-semibold text-slate-900">
-                      Payment successful
+                      {isCustom
+                        ? 'Payment request sent'
+                        : 'Payment successful'}
                     </h2>
                     <p className="text-sm text-slate-600 max-w-md mx-auto">
-                      We’ve processed your payment of{' '}
-                      <span className="font-semibold">
-                        ${paymentResult.amount?.toFixed(2)}{' '}
-                        {paymentResult.currency?.toUpperCase()}
-                      </span>
-                      . A receipt will be sent to your email.
+                      {isCustom ? (
+                        <>
+                          We&apos;ve sent a secure payment link for{' '}
+                          <span className="font-semibold">
+                            ${paymentResult.amount?.toFixed(2)} USD
+                          </span>{' '}
+                          to the provided email.
+                        </>
+                      ) : (
+                        <>
+                          We&apos;ve processed your payment of{' '}
+                          <span className="font-semibold">
+                            ${paymentResult.amount?.toFixed(2)}{' '}
+                            {paymentResult.currency?.toUpperCase()}
+                          </span>
+                          . A receipt will be sent to your email.
+                        </>
+                      )}
                     </p>
-                    {paymentResult.paymentIntentId && (
+                    {!isCustom && paymentResult.paymentIntentId && (
                       <p className="text-[10px] text-slate-400">
                         Transaction ID: {paymentResult.paymentIntentId}
                       </p>
@@ -875,11 +963,15 @@ const Payment: React.FC = () => {
                       <XCircle className="w-7 h-7" />
                     </div>
                     <h2 className="text-xl font-semibold text-slate-900">
-                      Payment could not be completed
+                      {isCustom
+                        ? 'Payment request could not be sent'
+                        : 'Payment could not be completed'}
                     </h2>
                     <p className="text-sm text-slate-600 max-w-md mx-auto">
                       {paymentResult?.error ||
-                        'Something went wrong while processing your payment. No charges were made.'}
+                        (isCustom
+                          ? 'Something went wrong while sending the payment request.'
+                          : 'Something went wrong while processing your payment. No charges were made.')}
                     </p>
                   </>
                 )}
@@ -889,7 +981,9 @@ const Payment: React.FC = () => {
                   className="mt-3 inline-flex items-center px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-lg hover:from-blue-700 hover:to-indigo-700 transition"
                 >
                   {paymentResult?.status === 'success'
-                    ? 'Make another payment'
+                    ? isCustom
+                      ? 'Send another payment request'
+                      : 'Make another payment'
                     : 'Try again'}
                 </button>
               </div>
@@ -899,7 +993,7 @@ const Payment: React.FC = () => {
           {/* Right: summary sidebar */}
           <aside className="bg-white/80 backdrop-blur-sm border border-slate-100 rounded-2xl shadow-md p-5 space-y-4">
             <h3 className="text-sm font-semibold text-slate-900">
-              Subscription summary
+              {isCustom ? 'Custom payment summary' : 'Subscription summary'}
             </h3>
             {selectedProduct ? (
               <>
@@ -915,7 +1009,7 @@ const Payment: React.FC = () => {
                       {getSidebarAmountLabel()}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      {isCustom ? 'USD' : 'USD / month'}
+                      {isCustom ? 'USD (one-time)' : 'USD / month'}
                     </p>
                   </div>
                 </div>
@@ -941,16 +1035,15 @@ const Payment: React.FC = () => {
               </>
             ) : (
               <p className="text-xs text-slate-500">
-                Select a plan or custom option to see a breakdown of your
-                payment.
+                Select a plan or a custom option to see a breakdown.
               </p>
             )}
 
             <div className="border-t border-slate-100 pt-3 space-y-1">
               <p className="flex items-center gap-2 text-[10px] text-slate-500">
                 <Shield className="w-3 h-3 text-emerald-500" />
-                Payments are processed by Stripe. We never store your card
-                details.
+                Payments and payment links are powered by Stripe. Card details
+                are never stored on our servers.
               </p>
               <p className="text-[10px] text-slate-400">
                 By continuing, you agree to the platform’s Terms of Service and
