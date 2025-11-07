@@ -22,16 +22,23 @@ import {
   Mail,
 } from 'lucide-react';
 
-// ===== Types =====
+/* =========================
+   Types
+   ========================= */
 
 interface Product {
   id: number;
   name: string;
-  price?: number; // optional for custom
+  price?: number; // for fixed plans
   description: string;
   features?: string[];
   highlight?: boolean;
-  allowCustomAmount?: boolean;
+  allowCustomAmount?: boolean; // true => custom
+}
+
+interface TenantSummary {
+  tenantId: string;
+  companyName: string;
 }
 
 interface PaymentData {
@@ -39,6 +46,7 @@ interface PaymentData {
   description: string;
   customerEmail: string;
   customerName: string;
+  tenantId?: string; // used only for custom payments
 }
 
 interface PaymentResult {
@@ -51,14 +59,17 @@ interface PaymentResult {
 
 interface PaymentFormProps {
   paymentData: PaymentData;
+  selectedProduct: Product | null;
   onSuccess: (result: PaymentResult) => void;
   onError: (error: string) => void;
   onBack: () => void;
 }
 
-// ===== Stripe CardElement config =====
+/* =========================
+   Stripe CardElement config
+   ========================= */
 
-const cardElementOptions = {
+const cardElementOptions: any = {
   style: {
     base: {
       fontSize: '16px',
@@ -75,10 +86,13 @@ const cardElementOptions = {
   hidePostalCode: true,
 };
 
-// ===== Step 3: Payment form (Stripe) =====
+/* =========================
+   Step 3: Payment form
+   ========================= */
 
 const PaymentForm: React.FC<PaymentFormProps> = ({
   paymentData,
+  selectedProduct,
   onSuccess,
   onError,
   onBack,
@@ -91,17 +105,15 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   const [processing, setProcessing] = useState(false);
   const [paymentError, setPaymentError] = useState('');
 
-  // Normalize amount -> number
   const getNormalizedAmount = (): number => {
     const raw = String(paymentData.amount).trim().replace(',', '.');
     const n = Number(raw);
     return Number.isFinite(n) ? n : 0;
   };
 
-  // Create PaymentIntent when billing details + amount are ready
+  // Create PaymentIntent when data ready
   useEffect(() => {
     const normalized = getNormalizedAmount();
-
     const canCreate =
       !!paymentData.customerEmail &&
       !!paymentData.customerName &&
@@ -118,7 +130,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            amount: normalized, // decimal; backend will *100 -> cents
+            amount: normalized, // backend hará *100
             customerEmail: paymentData.customerEmail,
             customerName: paymentData.customerName,
             description: paymentData.description || 'Custom payment',
@@ -131,13 +143,14 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           setClientSecret(data.clientSecret);
         } else {
           setPaymentError(
-            data?.error || 'Unable to initialize the payment. Please try again.'
+            data?.error ||
+              'Unable to initialize the payment. Please try again.',
           );
         }
       } catch (err) {
         console.error('Error initializing payment intent', err);
         setPaymentError(
-          'Network error while initializing the payment. Please try again.'
+          'Network error while initializing the payment. Please try again.',
         );
       } finally {
         setLoadingIntent(false);
@@ -162,7 +175,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
 
     const cardElement = elements.getElement(CardElement);
     if (!cardElement) {
-      setPaymentError('Could not load the card form. Please refresh and try again.');
+      setPaymentError(
+        'Could not load the card form. Please refresh and try again.',
+      );
       setProcessing(false);
       return;
     }
@@ -177,7 +192,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             email: paymentData.customerEmail,
           },
         },
-      }
+      },
     );
 
     if (error) {
@@ -185,11 +200,40 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         error.message || 'An error occurred while processing your payment.';
       setPaymentError(msg);
       onError(msg);
-    } else if (paymentIntent?.status === 'succeeded') {
+      setProcessing(false);
+      return;
+    }
+
+    if (paymentIntent?.status === 'succeeded') {
+      const amount = paymentIntent.amount / 100;
+      const currency = paymentIntent.currency;
+
+      // Si es custom + tenant seleccionado, avisamos al backend
+      if (selectedProduct?.allowCustomAmount && paymentData.tenantId) {
+        try {
+          await fetch('/api/billing/custom-invoice', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tenantId: paymentData.tenantId,
+              amount,
+              currency,
+              description: paymentData.description || 'Custom payment',
+              customerEmail: paymentData.customerEmail,
+              customerName: paymentData.customerName,
+              paymentIntentId: paymentIntent.id,
+            }),
+          });
+        } catch (err) {
+          console.error('Error notifying n8n for custom invoice', err);
+          // no rompemos el éxito del cobro
+        }
+      }
+
       onSuccess({
         paymentIntentId: paymentIntent.id,
-        amount: paymentIntent.amount / 100, // convert back to dollars
-        currency: paymentIntent.currency,
+        amount,
+        currency,
         status: 'success',
       });
     } else {
@@ -202,7 +246,6 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
     setProcessing(false);
   };
 
-  // Amount to show on the button
   const displayAmount = (() => {
     const n = getNormalizedAmount();
     if (n > 0) return n.toFixed(2);
@@ -261,7 +304,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
           ) : (
             <>
               <CreditCard className="w-4 h-4 mr-2" />
-              Confirm & pay ${displayAmount}
+              Confirm &amp; pay ${displayAmount}
             </>
           )}
         </button>
@@ -270,7 +313,9 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
   );
 };
 
-// ===== Main Payment Component =====
+/* =========================
+   Main Payment Component
+   ========================= */
 
 const Payment: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(1);
@@ -279,14 +324,18 @@ const Payment: React.FC = () => {
     description: '',
     customerEmail: '',
     customerName: '',
+    tenantId: undefined,
   });
   const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [tenants, setTenants] = useState<TenantSummary[]>([]);
+  const [loadingTenants, setLoadingTenants] = useState(false);
 
   const pk = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
   const pkMissing = !pk;
 
+  // Products
   const products: Product[] = [
     {
       id: 1,
@@ -327,17 +376,38 @@ const Payment: React.FC = () => {
     },
   ];
 
+  const isCustom = !!selectedProduct?.allowCustomAmount;
+
+  // Load tenants for Custom selector
+  useEffect(() => {
+    const loadTenants = async () => {
+      try {
+        setLoadingTenants(true);
+        const res = await fetch('/api/billing/tenants');
+        if (!res.ok) return;
+        const data = await res.json();
+        setTenants(data.items || []);
+      } catch (err) {
+        console.error('Error loading tenants', err);
+      } finally {
+        setLoadingTenants(false);
+      }
+    };
+    loadTenants();
+  }, []);
+
   const goToStep = (step: number) => setCurrentStep(step);
 
   const handleProductSelect = (product: Product) => {
     setSelectedProduct(product);
 
-    setPaymentData(prev => ({
+    setPaymentData((prev) => ({
       ...prev,
       amount: product.allowCustomAmount
         ? ''
-        : (product.price ?? 0).toFixed(2), // fixed plans -> "19.00"
+        : (product.price ?? 0).toFixed(2),
       description: product.allowCustomAmount ? '' : product.name,
+      tenantId: undefined,
     }));
 
     setErrors({});
@@ -353,7 +423,9 @@ const Payment: React.FC = () => {
 
     if (!paymentData.customerEmail.trim()) {
       newErrors.customerEmail = 'Email is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentData.customerEmail)) {
+    } else if (
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentData.customerEmail)
+    ) {
       newErrors.customerEmail = 'Enter a valid email address.';
     }
 
@@ -364,10 +436,13 @@ const Payment: React.FC = () => {
       newErrors.amount = 'Enter a valid amount (e.g. 149.00).';
     }
 
-    if (selectedProduct?.allowCustomAmount) {
+    if (isCustom) {
       if (!paymentData.description.trim()) {
         newErrors.description =
           'Description is required for custom payments.';
+      }
+      if (!paymentData.tenantId) {
+        newErrors.tenantId = 'Please select a tenant for this custom payment.';
       }
     }
 
@@ -394,23 +469,19 @@ const Payment: React.FC = () => {
       description: '',
       customerEmail: '',
       customerName: '',
+      tenantId: undefined,
     });
     setErrors({});
   };
 
-  const isCustom = !!selectedProduct?.allowCustomAmount;
-
-  // Sidebar amount label
   const getSidebarAmountLabel = () => {
     if (!selectedProduct) return null;
 
     if (isCustom) {
       const normalized = Number(
-        String(paymentData.amount).trim().replace(',', '.')
+        String(paymentData.amount).trim().replace(',', '.'),
       );
-      if (normalized > 0) {
-        return `$${normalized.toFixed(2)}`;
-      }
+      if (normalized > 0) return `$${normalized.toFixed(2)}`;
       return '--';
     }
 
@@ -438,9 +509,9 @@ const Payment: React.FC = () => {
           </div>
         </div>
 
-        {/* Main layout */}
+        {/* Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)] gap-6 items-start">
-          {/* Left: wizard card */}
+          {/* Left: wizard */}
           <div className="bg-white rounded-2xl shadow-lg p-6 md:p-7 space-y-6 border border-slate-100">
             {/* Stepper */}
             <div className="flex items-center gap-3 text-xs font-medium text-slate-600 mb-1">
@@ -539,10 +610,7 @@ const Payment: React.FC = () => {
                       </p>
                       <ul className="space-y-1 text-[10px] text-slate-500">
                         {p.features?.map((f) => (
-                          <li
-                            key={f}
-                            className="flex items-center gap-1.5"
-                          >
+                          <li key={f} className="flex items-center gap-1.5">
                             <CheckCircle className="w-3 h-3 text-emerald-500" />
                             <span>{f}</span>
                           </li>
@@ -554,7 +622,7 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {/* Step 2: billing details + custom amount */}
+            {/* Step 2: billing details */}
             {currentStep === 2 && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
@@ -680,10 +748,44 @@ const Payment: React.FC = () => {
                           </p>
                         )}
                       </div>
+
+                      {/* Tenant selector */}
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1">
+                          Tenant *
+                        </label>
+                        <select
+                          value={paymentData.tenantId || ''}
+                          onChange={(e) =>
+                            setPaymentData({
+                              ...paymentData,
+                              tenantId: e.target.value || undefined,
+                            })
+                          }
+                          className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="">Select tenant...</option>
+                          {tenants.map((t) => (
+                            <option key={t.tenantId} value={t.tenantId}>
+                              {t.companyName} ({t.tenantId})
+                            </option>
+                          ))}
+                        </select>
+                        {loadingTenants && (
+                          <p className="text-[10px] text-slate-400 mt-1">
+                            Loading tenants...
+                          </p>
+                        )}
+                        {errors.tenantId && (
+                          <p className="text-xs text-red-500 mt-1">
+                            {errors.tenantId}
+                          </p>
+                        )}
+                      </div>
                     </>
                   )}
 
-                  {/* For fixed plans just show validation error if something broke */}
+                  {/* For fixed plans: show amount error if exists */}
                   {!isCustom && errors.amount && (
                     <p className="text-xs text-red-500 mt-1">
                       {errors.amount}
@@ -732,6 +834,7 @@ const Payment: React.FC = () => {
                   <Elements stripe={stripePromise}>
                     <PaymentForm
                       paymentData={paymentData}
+                      selectedProduct={selectedProduct}
                       onSuccess={handlePaymentSuccess}
                       onError={handlePaymentError}
                       onBack={() => setCurrentStep(2)}
@@ -824,6 +927,17 @@ const Payment: React.FC = () => {
                     </li>
                   ))}
                 </ul>
+                {isCustom && paymentData.tenantId && (
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Tenant:{' '}
+                    {
+                      tenants.find(
+                        (t) => t.tenantId === paymentData.tenantId,
+                      )?.companyName
+                    }{' '}
+                    ({paymentData.tenantId})
+                  </p>
+                )}
               </>
             ) : (
               <p className="text-xs text-slate-500">
