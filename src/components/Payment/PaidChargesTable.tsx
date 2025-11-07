@@ -224,18 +224,11 @@ const PaidChargesTable: React.FC = () => {
                         </div>
                       </td>
                       <td className="px-3 py-2 align-top">
-                        <div className="flex items-start gap-1.5 text-slate-700">
-                          <FileText className="w-3 h-3 text-slate-400 mt-0.5" />
-                          <p
-                            className="
-                              text-[10px] md:text-xs
-                              leading-snug
-                              whitespace-pre-wrap
-                              break-words
-                            "
-                          >
+                        <div className="flex items-center gap-1.5 text-slate-700">
+                          <FileText className="w-3 h-3 text-slate-400" />
+                          <span className="truncate max-w-[180px]">
                             {c.description || '-'}
-                          </p>
+                          </span>
                         </div>
                       </td>
                       <td className="px-3 py-2 align-top">
