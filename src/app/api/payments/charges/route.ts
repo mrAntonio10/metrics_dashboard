@@ -2,14 +2,12 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
-const STRIPE_API_VERSION: Stripe.LatestApiVersion = '2024-06-20'; // o la de tu cuenta
+const STRIPE_API_VERSION: Stripe.LatestApiVersion = '2024-06-20';
 
 export async function GET(request: Request) {
   try {
     const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
-    // ⚠️ Importante:
-    // No lanzamos error en tiempo de build; respondemos 500 sólo si en runtime no está configurada.
     if (!stripeSecretKey) {
       return NextResponse.json(
         {
@@ -57,6 +55,12 @@ export async function GET(request: Request) {
           ? ch.payment_method_details.card?.network_transaction_id || null
           : null;
 
+      // 👇 Aquí el fallback:
+      const email =
+        ch.billing_details?.email || // primero: email en billing_details
+        ch.receipt_email ||          // si no hay: usa receipt_email
+        '';
+
       return {
         id: ch.id,
         object: ch.object,
@@ -64,7 +68,7 @@ export async function GET(request: Request) {
         currency: ch.currency,
         description: ch.description || '',
         name: ch.billing_details?.name || '',
-        email: ch.billing_details?.email || '',
+        email, // ya con el fallback aplicado
         country: billingCountry,
         networkTransactionId,
         created: ch.created,
