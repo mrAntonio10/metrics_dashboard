@@ -19,6 +19,7 @@ docker run -d \
   -e TZ=America/La_Paz \
   -e BILLING_WEBHOOK="https://n8n.uqminds.org/webhook/d005f867-3f6f-415e-8068-57d6b22b691a" \
   -e MANAGEMENT_STATUS="TRIAL" \
+  -e STRIPE_SECRET_KEY="sk_test_51SCsTp0zcqINwdzuB8nRcxz79JUn660NvZnXdrw14nNK13k5ZeCN4ofnECfyPVwFpQFoftOxZ0u4DrG7vCK1F25X00wfl71eff" \
   -e MANAGEMENT_DATE="2025-10-16" \
   -e COMPANY_NAME="It's Vivace Music Academy & More, LLC" \
   -e COMPANY_KEY="prod" \
