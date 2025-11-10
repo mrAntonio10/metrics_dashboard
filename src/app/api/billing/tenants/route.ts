@@ -52,10 +52,16 @@ export async function GET() {
         const base = path.basename(file);
         const tenantId = base.slice(ENV_PREFIX.length);
         const env = parseDotenv(await fs.readFile(file, 'utf8'));
+
+        const realName = (env.REAL_NAME || env.NEXT_PUBLIC_REAL_NAME || '').trim();
+        const appNameRaw = (env.APP_NAME || env.NEXT_PUBLIC_APP_NAME || '').trim();
+
         const companyName =
-          env['COMPANY_NAME'] ||
-          env['TENANT_NAME'] ||
-          env['APP_TENANT_NAME'] ||
+          realName ||
+          (env.COMPANY_NAME || '').trim() ||
+          (env.TENANT_NAME || '').trim() ||
+          (env.APP_TENANT_NAME || '').trim() ||
+          appNameRaw ||
           tenantId;
 
         return {
