@@ -9,8 +9,6 @@ import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission';
-
-// Recharts
 import {
   ResponsiveContainer,
   LineChart,
@@ -27,9 +25,9 @@ import {
  * ========================= */
 
 type PortBinding = {
-  container: string;        // e.g., "80/tcp"
-  host_ip: string | null;   // e.g., "0.0.0.0" | "::" | null (not published)
-  host_port: string | null; // e.g., "8085" | null (not published)
+  container: string;
+  host_ip: string | null;
+  host_port: string | null;
 };
 
 type DockerNetwork = {
@@ -43,8 +41,8 @@ type Container = {
   name: string;
   image: string;
   status: string;
-  ports_list: string;         // raw docker ps text (may be empty)
-  ports?: PortBinding[];      // structured port bindings
+  ports_list: string;
+  ports?: PortBinding[];
   client: string;
   role: string;
   tls: { exposes_443: boolean };
@@ -87,6 +85,7 @@ type MetricsPayload = {
   containers: Container[];
   clients: string[];
   client_agg: ClientAgg[];
+  client_display?: Record<string, string>; // { rawClientKey: displayName }
 };
 
 /* =========================
@@ -99,7 +98,6 @@ const labelHasAny = (labels: Record<string, string> | undefined, prefixes: strin
   return keys.some((k) => prefixes.some((p) => k.startsWith(p)));
 };
 
-// Human-readable ports string (prefers structured JSON if present)
 const pickPorts = (c: Container) => {
   if (Array.isArray(c.ports) && c.ports.length > 0) {
     const published = [...new Set(
@@ -164,6 +162,15 @@ const pickStatus = (c: Container) => {
   if (s) return s;
   const up = fmtDuration(c.uptime_seconds);
   return up ? `Up ${up}` : '—';
+};
+
+/* =========================
+ * Client display helper
+ * ========================= */
+
+const resolveClientName = (id: string, map?: Record<string, string>) => {
+  if (id === 'all') return 'All Clients';
+  return map?.[id] || id;
 };
 
 /* =========================
@@ -234,16 +241,24 @@ export default function UsagePage() {
     };
   }, [date]);
 
-  const clients = useMemo(() => ['all', ...(data?.clients ?? [])], [data]);
+  const clients = useMemo(
+    () => ['all', ...(data?.clients ?? [])],
+    [data],
+  );
 
   const selectedAgg = useMemo(() => {
     if (!data) return [];
-    return client === 'all' ? data.client_agg : data.client_agg.filter((a) => a.client === client);
+    return client === 'all'
+      ? data.client_agg
+      : data.client_agg.filter((a) => a.client === client);
   }, [data, client]);
 
   const visibleContainers = useMemo<Container[]>(() => {
     if (!data) return [];
-    const list = client === 'all' ? data.containers : data.containers.filter((c) => c.client === client);
+    const list =
+      client === 'all'
+        ? data.containers
+        : data.containers.filter((c) => c.client === client);
     return list.slice().sort((a, b) => {
       const ca = a.client.localeCompare(b.client);
       if (ca !== 0) return ca;
@@ -276,7 +291,10 @@ export default function UsagePage() {
         const series = results
           .filter((x): x is { date: string; payload: MetricsPayload } => !!x)
           .map(({ date, payload }) => {
-            const aggs = client === 'all' ? payload.client_agg : payload.client_agg.filter((a) => a.client === client);
+            const aggs =
+              client === 'all'
+                ? payload.client_agg
+                : payload.client_agg.filter((a) => a.client === client);
             const cpu = aggs.reduce((acc, a) => acc + (a.cpu_percent_sum || 0), 0);
             const memUsed = aggs.reduce((acc, a) => acc + (a.mem_used_bytes_sum || 0), 0);
             const memLimit = aggs.reduce((acc, a) => acc + (a.mem_limit_bytes_sum || 0), 0);
@@ -315,7 +333,7 @@ export default function UsagePage() {
             <SelectContent>
               {clients.map((c) => (
                 <SelectItem key={c} value={c}>
-                  {c === 'all' ? 'All Clients' : c}
+                  {resolveClientName(c, data?.client_display)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -368,7 +386,7 @@ export default function UsagePage() {
           <Card>
             <CardHeader>
               <CardTitle>
-                {client === 'all' ? 'All Clients' : client} – CPU% and RAM% (latest snapshots)
+                {resolveClientName(client, data?.client_display)} – CPU% and RAM% (latest snapshots)
               </CardTitle>
             </CardHeader>
             <CardContent className="h-[320px]">
@@ -424,7 +442,9 @@ export default function UsagePage() {
               return (
                 <div key={a.client} className="rounded-xl border p-4 space-y-2">
                   <div className="flex items-center justify-between">
-                    <div className="font-semibold">{a.client}</div>
+                    <div className="font-semibold">
+                      {resolveClientName(a.client, data?.client_display)}
+                    </div>
                     <Badge variant="outline">{a.containers} containers</Badge>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-sm">
@@ -480,22 +500,35 @@ export default function UsagePage() {
                   const ram = `${fmtBytes(c.stats.mem_used_bytes)} / ${fmtBytes(
                     c.stats.mem_limit_bytes,
                   )} (${fmtNum(c.stats.mem_percent)}%)`;
-                  const net = `${fmtBytes(c.stats.net_rx_bytes)} / ${fmtBytes(c.stats.net_tx_bytes)}`;
+                  const net = `${fmtBytes(c.stats.net_rx_bytes)} / ${fmtBytes(
+                    c.stats.net_tx_bytes,
+                  )}`;
                   return (
                     <TableRow key={c.id}>
                       <TableCell className="font-mono text-xs">
                         {pickName(c)}
-                        <div className="text-[10px] text-muted-foreground">{pickImage(c)}</div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {pickImage(c)}
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{c.client}</Badge>
+                        <Badge variant="outline">
+                          {resolveClientName(c.client, data?.client_display)}
+                        </Badge>
                       </TableCell>
                       <TableCell>{c.role}</TableCell>
-                      <TableCell className="text-right">{fmtNum(c.stats.cpu_percent)}%</TableCell>
+                      <TableCell className="text-right">
+                        {fmtNum(c.stats.cpu_percent)}%
+                      </TableCell>
                       <TableCell className="text-right">{ram}</TableCell>
                       <TableCell className="text-right">{net}</TableCell>
-                      <TableCell className="text-right">{c.stats.pids}</TableCell>
-                      <TableCell className="max-w-[320px] truncate" title={pickPorts(c)}>
+                      <TableCell className="text-right">
+                        {c.stats.pids}
+                      </TableCell>
+                      <TableCell
+                        className="max-w-[320px] truncate"
+                        title={pickPorts(c)}
+                      >
                         {pickPorts(c)}
                       </TableCell>
                       <TableCell>
@@ -511,7 +544,10 @@ export default function UsagePage() {
                 })}
                 {visibleContainers.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center text-sm text-muted-foreground">
+                    <TableCell
+                      colSpan={9}
+                      className="text-center text-sm text-muted-foreground"
+                    >
                       No containers for this filter.
                     </TableCell>
                   </TableRow>
