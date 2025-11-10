@@ -7,19 +7,33 @@ export type TenantConfig = {
   id: string
   name: string
   envPath: string
-  db: { host: string; port: number; database: string; user: string; password: string }
-  tables: { users: string; clients: string }
-  management: { status: string; date: string }
+  db: {
+    host: string
+    port: number
+    database: string
+    user: string
+    password: string
+  }
+  tables: {
+    users: string      // opcionalmente se puede usar si quieres otra lógica después
+    providers: string  // aquí viven admins/providers (type)
+  }
+  management: {
+    status: string
+    date: string
+  }
 }
 
 export type TenantCounts = {
   tenantId: string
   tenantName: string
-  users: number
-  clients: number
+  users: number        // SOLO billables = admins + providers
   admins: number
   providers: number
-  management?: { status: string; date: string }
+  management?: {
+    status: string
+    date: string
+  }
   error?: string
 }
 
@@ -73,15 +87,18 @@ export async function loadTenants(): Promise<TenantConfig[]> {
         db: { host, port, database, user, password },
         tables: {
           users: env.USERS_TABLE || 'users',
-          clients: env.CLIENTS_TABLE || 'clients',
+          providers: env.PROVIDERS_TABLE || 'providers',
         },
         management: {
           status: env.MANAGEMENT_STATUS || '',
           date: env.MANAGEMENT_DATE || '',
         },
       })
-    } catch {}
+    } catch {
+      // silencio: tenant inválido no rompe a los demás
+    }
   }
+
   return tenants
 }
 
@@ -90,26 +107,30 @@ export async function getTenantCounts(t: TenantConfig): Promise<TenantCounts> {
   try {
     conn = await mysql.createConnection(t.db)
 
-    const [cRows] = await conn.query(`SELECT COUNT(*) AS c FROM \`${t.tables.clients}\``)
-    const clients = Number((cRows as any)[0]?.c || 0)
-
     let admins = 0
     let providers = 0
+
     try {
-      const [rows] = await conn.query(`SELECT type, COUNT(*) c FROM providers GROUP BY type`)
+      // Contamos desde la tabla de providers (configurable)
+      const [rows] = await conn.query(
+        `SELECT type, COUNT(*) AS c FROM \`${t.tables.providers}\` GROUP BY type`,
+      )
       const map = new Map<string, number>()
-      ;(rows as any[]).forEach((r) => map.set(String(r.type), Number(r.c)))
+      ;(rows as any[]).forEach((r) =>
+        map.set(String(r.type).toLowerCase(), Number(r.c)),
+      )
       admins = map.get('admin') || 0
       providers = map.get('provider') || 0
-    } catch {}
+    } catch {
+      // Si no existe la tabla, se quedan en 0/0
+    }
 
-    const users = clients + admins + providers
+    const users = admins + providers // 👈 SOLO billables
 
     return {
       tenantId: t.id,
       tenantName: t.name,
       users,
-      clients,
       admins,
       providers,
       management: t.management,
@@ -119,7 +140,6 @@ export async function getTenantCounts(t: TenantConfig): Promise<TenantCounts> {
       tenantId: t.id,
       tenantName: t.name,
       users: 0,
-      clients: 0,
       admins: 0,
       providers: 0,
       management: t.management,
