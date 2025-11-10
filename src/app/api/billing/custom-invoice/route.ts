@@ -35,10 +35,18 @@ async function findTenantEnv(tenantId: string) {
   const env = parseDotenv(content);
 
   const companyKey = env['COMPANY_KEY'] || tenantId;
+
+  const realName =
+    (env['REAL_NAME'] || env['NEXT_PUBLIC_REAL_NAME'] || '').trim();
+  const appName =
+    (env['APP_NAME'] || env['NEXT_PUBLIC_APP_NAME'] || '').trim();
+
   const companyName =
+    realName ||
     env['COMPANY_NAME'] ||
     env['TENANT_NAME'] ||
     env['APP_TENANT_NAME'] ||
+    appName ||
     tenantId;
 
   const invoiceEmailsRaw =
@@ -59,6 +67,7 @@ async function findTenantEnv(tenantId: string) {
     invoiceEmails,
   };
 }
+
 
 function esc(s: any) {
   return String(s ?? '').replace(/[&<>]/g, (c) => {
@@ -119,11 +128,10 @@ function renderCustomHTML(opts: {
       <div class="label">Billed to</div>
       <div class="value">${esc(customerName || 'Client')}</div>
 
-      ${
-        paymentIntentId
-          ? `<div class="box">Stripe PaymentIntent ID: <strong>${esc(paymentIntentId)}</strong></div>`
-          : ''
-      }
+      ${paymentIntentId
+      ? `<div class="box">Stripe PaymentIntent ID: <strong>${esc(paymentIntentId)}</strong></div>`
+      : ''
+    }
 
       <p class="muted">
         This email confirms your custom payment request. If you have questions, please reply directly to this message.
@@ -219,8 +227,8 @@ export async function POST(req: Request) {
           ? [...tenantEmails, fallbackEmail]
           : tenantEmails
         : fallbackEmail
-        ? [fallbackEmail]
-        : []
+          ? [fallbackEmail]
+          : []
     ).filter((v, i, arr) => arr.indexOf(v) === i);
 
     const payload = {

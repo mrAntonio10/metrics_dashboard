@@ -160,16 +160,16 @@ type N8nPayload = {
 
 type Result =
   | {
-      tenantId: string;
-      status: number;
-      ok: true;
-      reason?: string;
-      qty?: number;
-      rate?: number;
-      total?: number;
-      to?: string[];
-      attachInfo?: { ok: boolean; bytes?: number; name?: string; mime?: string; error?: string };
-    }
+    tenantId: string;
+    status: number;
+    ok: true;
+    reason?: string;
+    qty?: number;
+    rate?: number;
+    total?: number;
+    to?: string[];
+    attachInfo?: { ok: boolean; bytes?: number; name?: string; mime?: string; error?: string };
+  }
   | { tenantId: string; status: number; ok: false; error: string; attachInfo?: any };
 
 /* =========================
@@ -181,7 +181,20 @@ async function readTenantEnv(file: string): Promise<Tenant> {
   const env = parseDotenv(await fs.readFile(file, 'utf8'));
 
   const companyKey = env['COMPANY_KEY'] || tenantId;
-  const companyName = env['COMPANY_NAME'] || env['TENANT_NAME'] || env['APP_TENANT_NAME'] || tenantId;
+
+  const realName =
+    (env['REAL_NAME'] || env['NEXT_PUBLIC_REAL_NAME'] || '').trim();
+  const appNameRaw =
+    (env['APP_NAME'] || env['NEXT_PUBLIC_APP_NAME'] || '').trim();
+
+  const companyName =
+    realName ||
+    env['COMPANY_NAME'] ||
+    env['TENANT_NAME'] ||
+    env['APP_TENANT_NAME'] ||
+    appNameRaw ||
+    tenantId;
+
   const managementStatus = (env['MANAGEMENT_STATUS'] || '').toUpperCase();
   const managementDate = env['MANAGEMENT_DATE'] || '';
 
@@ -195,16 +208,19 @@ async function readTenantEnv(file: string): Promise<Tenant> {
   const providersTable = env['PROVIDERS_TABLE'] || 'providers';
 
   const ratePerUser =
-    env['RATE_PER_USER'] ? Number(env['RATE_PER_USER']) : env['USER_PRICE'] ? Number(env['USER_PRICE']) : undefined;
+    env['RATE_PER_USER']
+      ? Number(env['RATE_PER_USER'])
+      : env['USER_PRICE']
+        ? Number(env['USER_PRICE'])
+        : undefined;
 
   const invoiceEmails =
     normalizeEmails(env['EMAIL_FOR_INVOICE']) ||
     normalizeEmails(env['INVOICE_EMAIL']) ||
     normalizeEmails(env['BILLING_EMAIL']);
 
-  const appName = env['APP_NAME'] || companyName;
+  const appName = appNameRaw || companyName;
 
-  // Force USD end-to-end (HTML, PDF/PNG, and webhook payload)
   const currency = 'USD';
 
   return {
@@ -214,14 +230,25 @@ async function readTenantEnv(file: string): Promise<Tenant> {
     managementStatus,
     managementDate,
     envFile: file,
-    db: { host: host || '', port, database: database || '', user: user || '', password: password || '' },
-    tables: { users: usersTable, clients: clientsTable, providers: providersTable },
+    db: {
+      host: host || '',
+      port,
+      database: database || '',
+      user: user || '',
+      password: password || '',
+    },
+    tables: {
+      users: usersTable,
+      clients: clientsTable,
+      providers: providersTable,
+    },
     ratePerUser,
     invoiceEmails,
     appName,
     currency,
   };
 }
+
 
 /* =========================
    DB helpers per tenant
@@ -278,7 +305,7 @@ async function getCountsPerTenant(t: Tenant): Promise<Counts> {
   } finally {
     try {
       await conn?.end();
-    } catch {}
+    } catch { }
   }
 }
 
