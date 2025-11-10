@@ -63,7 +63,12 @@ async function loadTenants(): Promise<TenantConfig[]> {
       const env = parseDotEnv(content)
 
       const id = file.slice('.env.'.length)
-      const name = env.APP_NAME || id
+
+      const realName = (env.REAL_NAME || env.NEXT_PUBLIC_REAL_NAME || '').trim()
+      const appName = (env.APP_NAME || env.NEXT_PUBLIC_APP_NAME || '').trim()
+
+      const name =
+        realName || appName || id
 
       const host = env.DB_HOST
       const port = Number(env.DB_PORT || 3306)
@@ -124,7 +129,7 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
         GROUP BY type
       `)
       const map = new Map<string, number>()
-      ;(typeRows as any[]).forEach((r) => map.set(String(r.type), Number(r.c)))
+        ; (typeRows as any[]).forEach((r) => map.set(String(r.type), Number(r.c)))
       admins = map.get('admin') || 0
       providers = map.get('provider') || 0
     } catch (err: any) {
@@ -157,7 +162,7 @@ async function getTenantCounts(tenant: TenantConfig): Promise<TenantCounts> {
   } finally {
     try {
       await conn?.end()
-    } catch {}
+    } catch { }
   }
 }
 
