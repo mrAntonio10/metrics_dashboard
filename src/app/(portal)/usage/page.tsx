@@ -1,4 +1,3 @@
-// src/app/(portal)/usage/page.tsx
 'use client';
 
 import {
@@ -173,6 +172,18 @@ type AwsBillingError = {
 type AwsBillingPayload = AwsBillingOk | AwsBillingError;
 
 /* =========================
+ * Types: Anthropic Usage
+ * ========================= */
+
+type AnthropicUsageRow = {
+  executionId: number | string;
+  tenant: string;
+  inputTokens: number;
+  outputTokens: number;
+  date: string;
+};
+
+/* =========================
  * Format helpers
  * ========================= */
 
@@ -303,7 +314,7 @@ const formatMonthLabel = (ym: string) => {
 };
 
 /* =========================
- * Custom hooks
+ * Custom hooks: Usage Dates / Metrics
  * ========================= */
 
 function useUsageDates() {
@@ -479,6 +490,10 @@ function useHistorySeries(
   return { series, loading };
 }
 
+/* =========================
+ * Custom hooks: AWS
+ * ========================= */
+
 function useAwsEc2Summary() {
   const [summary, setSummary] = useState<{
     total: number;
@@ -643,6 +658,83 @@ function useAwsBilling(month: string) {
 }
 
 /* =========================
+ * Custom hooks: Anthropic Usage
+ * ========================= */
+
+function useAnthropicUsage() {
+  const [rows, setRows] = useState<AnthropicUsageRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancel = false;
+
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const res = await fetch('/api/anthropic-usage', {
+          cache: 'no-store',
+        });
+
+        if (!res.ok) {
+          const text =
+            (await res.text().catch(() => '')) ||
+            '<sin cuerpo>';
+          console.error(
+            '[ANTHROPIC][UsagePage] HTTP error:',
+            res.status,
+            text,
+          );
+          if (!cancel)
+            setError(`HTTP ${res.status}`);
+          return;
+        }
+
+        const json = await res.json();
+
+        if (!json.ok) {
+          if (!cancel)
+            setError(
+              json.error ||
+                'Anthropic usage error',
+            );
+          return;
+        }
+
+        const list: AnthropicUsageRow[] =
+          json.rows || [];
+
+        if (!cancel) {
+          setRows(list);
+          setError(null);
+        }
+      } catch (e) {
+        console.error(
+          '[ANTHROPIC][UsagePage] Error:',
+          e,
+        );
+        if (!cancel)
+          setError(
+            'Failed to fetch Anthropic usage',
+          );
+      } finally {
+        if (!cancel) setLoading(false);
+      }
+    };
+
+    load();
+
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  return { rows, loading, error };
+}
+
+/* =========================
  * Component
  * ========================= */
 
@@ -669,6 +761,15 @@ export default function UsagePage() {
     loading: billingLoading,
     error: billingError,
   } = useAwsBilling(billingMonth);
+
+  const { rows: anthropicRows, loading: anthropicLoading, error: anthropicError } =
+    useAnthropicUsage();
+
+  const [anthropicTenant, setAnthropicTenant] =
+    useState<string>('all');
+  const [anthropicPage, setAnthropicPage] =
+    useState<number>(1);
+  const anthropicPageSize = 10;
 
   const monthOptions = useMemo(
     () => getRecentMonths(12),
@@ -709,6 +810,68 @@ export default function UsagePage() {
     return historySeries.filter((x) => x.date <= date);
   }, [historySeries, date]);
 
+  const anthropicTenants = useMemo(
+    () => [
+      'all',
+      ...Array.from(
+        new Set(
+          (anthropicRows || [])
+            .map((r) => r.tenant)
+            .filter(Boolean),
+        ),
+      ).sort(),
+    ],
+    [anthropicRows],
+  );
+
+  const anthropicFiltered = useMemo(() => {
+    const list = (anthropicRows || [])
+      .filter(
+        (r) =>
+          anthropicTenant === 'all' ||
+          r.tenant === anthropicTenant,
+      )
+      .slice()
+      .sort((a, b) => {
+        const da = new Date(a.date || '').getTime() || 0;
+        const db = new Date(b.date || '').getTime() || 0;
+        if (db !== da) return db - da;
+        const ea = Number(a.executionId) || 0;
+        const eb = Number(b.executionId) || 0;
+        return eb - ea;
+      });
+
+    const totalPages = Math.max(
+      1,
+      Math.ceil(list.length / anthropicPageSize),
+    );
+    const current = Math.min(
+      anthropicPage || 1,
+      totalPages,
+    );
+    const start = (current - 1) * anthropicPageSize;
+    const pageItems = list.slice(
+      start,
+      start + anthropicPageSize,
+    );
+
+    return {
+      pageItems,
+      totalPages,
+      total: list.length,
+      currentPage: current,
+    };
+  }, [
+    anthropicRows,
+    anthropicTenant,
+    anthropicPage,
+  ]);
+
+  useEffect(() => {
+    // reset a página 1 cuando cambie tenant o dataset
+    setAnthropicPage(1);
+  }, [anthropicTenant, anthropicRows.length]);
+
   const onClientChange = useCallback(
     (v: string) => setClient(v),
     [],
@@ -721,6 +884,21 @@ export default function UsagePage() {
     (v: string) => setBillingMonth(v),
     [],
   );
+  const onAnthropicTenantChange = useCallback(
+    (v: string) => setAnthropicTenant(v),
+    [],
+  );
+  const goAnthropicPrev = useCallback(() => {
+    setAnthropicPage((p) => Math.max(1, p - 1));
+  }, []);
+  const goAnthropicNext = useCallback(() => {
+    setAnthropicPage((p) =>
+      Math.min(
+        p + 1,
+        anthropicFiltered.totalPages,
+      ),
+    );
+  }, [anthropicFiltered.totalPages]);
 
   return (
     <ProtectedComponent
@@ -732,7 +910,7 @@ export default function UsagePage() {
         <div className="px-2 pt-4 md:px-4">
           <PageHeader
             title="Usage Administration"
-            description="Per-client Docker metrics, AWS usage, and monthly billing."
+            description="Per-client Docker metrics, AWS usage, monthly billing, and Anthropic token usage."
           >
             <div className="flex flex-wrap items-center gap-2">
               {/* Client filter */}
@@ -846,7 +1024,7 @@ export default function UsagePage() {
         <div className="flex-1 overflow-auto px-2 pb-6 md:px-4">
           <Accordion
             type="multiple"
-            defaultValue={['aws', 'tenants']}
+            defaultValue={['aws', 'anthropic', 'tenants']}
             className="flex flex-col gap-4 max-w-full"
           >
             {/* AWS USAGE & BILLING */}
@@ -1010,6 +1188,175 @@ export default function UsagePage() {
                       <div className="text-xs text-muted-foreground">
                         No billing data for this month.
                       </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </AccordionContent>
+            </AccordionItem>
+
+            {/* ANTHROPIC TOKEN USAGE */}
+            <AccordionItem value="anthropic">
+              <AccordionTrigger className="text-lg font-semibold">
+                Anthropic Token Usage
+              </AccordionTrigger>
+              <AccordionContent className="flex flex-col gap-4 pt-2">
+                <Card className="w-full">
+                  <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <CardTitle>
+                        Anthropic Token Usage by Tenant
+                      </CardTitle>
+                      <p className="text-xs text-muted-foreground">
+                        Datos obtenidos desde n8n. Filtra por tenant y revisa los tokens consumidos por ejecución.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        Tenant
+                      </span>
+                      <Select
+                        value={anthropicTenant}
+                        onValueChange={onAnthropicTenantChange}
+                      >
+                        <SelectTrigger
+                          className="w-[220px]"
+                          aria-label="Filter Anthropic usage by tenant"
+                        >
+                          <SelectValue placeholder="All tenants" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {anthropicTenants.map((t) => (
+                            <SelectItem
+                              key={t}
+                              value={t}
+                            >
+                              {t === 'all' ? 'All tenants' : t}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-3 text-sm">
+                    {anthropicLoading && (
+                      <div className="text-xs text-muted-foreground">
+                        Loading Anthropic usage…
+                      </div>
+                    )}
+
+                    {anthropicError && (
+                      <div className="text-xs text-destructive">
+                        Error: {anthropicError}
+                      </div>
+                    )}
+
+                    {!anthropicLoading &&
+                      !anthropicError &&
+                      anthropicFiltered.total === 0 && (
+                        <div className="text-xs text-muted-foreground">
+                          No Anthropic usage data found.
+                        </div>
+                      )}
+
+                    {anthropicFiltered.total > 0 && (
+                      <>
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-foreground">
+                          <div>
+                            Total rows:{' '}
+                            <span className="font-semibold">
+                              {anthropicFiltered.total}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={goAnthropicPrev}
+                              disabled={
+                                anthropicFiltered.currentPage ===
+                                1
+                              }
+                              className="rounded border px-2 py-1 text-[10px] disabled:opacity-40"
+                            >
+                              Prev
+                            </button>
+                            <span>
+                              Page{' '}
+                              <span className="font-semibold">
+                                {anthropicFiltered.currentPage}
+                              </span>{' '}
+                              /{' '}
+                              {anthropicFiltered.totalPages}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={goAnthropicNext}
+                              disabled={
+                                anthropicFiltered.currentPage ===
+                                anthropicFiltered.totalPages
+                              }
+                              className="rounded border px-2 py-1 text-[10px] disabled:opacity-40"
+                            >
+                              Next
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="w-full overflow-x-auto">
+                          <Table className="min-w-[720px]">
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>
+                                  EXECUTION_ID
+                                </TableHead>
+                                <TableHead>
+                                  TENANT
+                                </TableHead>
+                                <TableHead className="text-right">
+                                  INPUT
+                                </TableHead>
+                                <TableHead className="text-right">
+                                  OUTPUT
+                                </TableHead>
+                                <TableHead>
+                                  DATE
+                                </TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {anthropicFiltered.pageItems.map(
+                                (row) => (
+                                  <TableRow
+                                    key={`${row.executionId}-${row.tenant}-${row.date}`}
+                                  >
+                                    <TableCell className="font-mono text-xs">
+                                      {row.executionId}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline">
+                                        {row.tenant}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      {fmtNum(
+                                        row.inputTokens,
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      {fmtNum(
+                                        row.outputTokens,
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="text-xs">
+                                      {row.date ||
+                                        '—'}
+                                    </TableCell>
+                                  </TableRow>
+                                ),
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </>
                     )}
                   </CardContent>
                 </Card>
