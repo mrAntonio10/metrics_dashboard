@@ -36,7 +36,7 @@ export function buildInvoiceBody(input: BuildInvoiceInput) {
   };
 }
 
-const N8N_WEBHOOK = 'https://n8n.uqminds.org/webhook/d005f867-3f6f-415e-8068-57d6b22b691a';
+const N8N_WEBHOOK = 'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d';
 
 export async function postInvoiceToN8N(payload: ReturnType<typeof buildInvoiceBody>) {
   const res = await fetch(N8N_WEBHOOK, {
