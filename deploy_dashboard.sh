@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
+echo "==> Creando red Docker (si no existe)..."
+docker network create metrics-net >/dev/null 2>&1 || true
+
 echo "==> Ejecutando build de npm..."
 npm run build
 
@@ -15,9 +18,10 @@ echo "==> Ejecutando nuevo contenedor..."
 docker run -d \
   --name metrics-dashboard \
   --restart=unless-stopped \
-  -p 9002:9002 \
+  --network metrics-net \
   -e TZ=America/La_Paz \
-  -e BILLING_WEBHOOK="https://n8n.uqminds.org/webhook/d005f867-3f6f-415e-8068-57d6b22b691a" \
+  -p 9002:9002 \
+  -e BILLING_WEBHOOK="https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d" \
   -e MANAGEMENT_STATUS="TRIAL" \
   -e STRIPE_SECRET_KEY="sk_test_51SCsTp0zcqINwdzuB8nRcxz79JUn660NvZnXdrw14nNK13k5ZeCN4ofnECfyPVwFpQFoftOxZ0u4DrG7vCK1F25X00wfl71eff" \
   -e MANAGEMENT_DATE="2025-10-16" \
@@ -29,6 +33,7 @@ docker run -d \
   -e METRICS_HISTORY_FILE=/var/lib/vivace-metrics/history.json \
   -e TENANTS_DIR="/root/mr/vivace-api" \
   -v /var/lib/vivace-metrics:/var/lib/vivace-metrics:rw \
+  -v /var/run/docker.sock:/var/run/docker.sock \
   -v /root/mr/vivace-api:/root/mr/vivace-api:rw \
   metrics-dashboard:latest
 
@@ -36,3 +41,4 @@ echo "==> Limpiando imágenes colgantes..."
 docker image prune -f
 
 echo "==> Despliegue completado correctamente ✅"
+
