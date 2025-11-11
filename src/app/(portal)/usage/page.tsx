@@ -38,6 +38,13 @@ import {
 } from '@/hooks/use-permission';
 
 import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from '@/components/ui/accordion';
+
+import {
   ResponsiveContainer,
   LineChart,
   Line,
@@ -269,6 +276,32 @@ const resolveClientName = (
   return map?.[id] || id;
 };
 
+/* Helpers para meses billing */
+
+function getDefaultBillingMonth(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+function getRecentMonths(count = 12): string[] {
+  const out: string[] = [];
+  const now = new Date();
+  for (let i = 0; i < count; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    out.push(`${y}-${m}`);
+  }
+  return out;
+}
+
+const formatMonthLabel = (ym: string) => {
+  const [y, m] = ym.split('-');
+  return `${y}-${m}`;
+};
+
 /* =========================
  * Custom hooks
  * ========================= */
@@ -292,7 +325,7 @@ function useUsageDates() {
           .sort();
         if (!cancel) setDates(list);
       } catch {
-        // silencioso
+        // noop
       }
     })();
 
@@ -449,7 +482,7 @@ function useHistorySeries(
   return { series, loading };
 }
 
-/** Llama /api/aws para obtener resumen simple de EC2 y logear payload. */
+/** Llama /api/aws para obtener resumen simple de EC2. */
 function useAwsEc2Summary() {
   const [summary, setSummary] = useState<{
     total: number;
@@ -537,80 +570,70 @@ function useAwsEc2Summary() {
   return { summary, loading, error };
 }
 
-/** Llama /api/aws/billing y escribe resumen bonito en consola (solo debug). */
-function useAwsBillingConsoleLog() {
+/** Billing mensual: /api/aws/billing?month=YYYY-MM */
+function useAwsBilling(month: string) {
+  const [data, setData] = useState<AwsBillingOk | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
+    if (!month) return;
     let cancel = false;
 
     const run = async () => {
       try {
-        console.log(
-          '[AWS][Billing] Fetching /api/aws/billing...',
-        );
-        const res = await fetch('/api/aws/billing', {
+        setLoading(true);
+        setError(null);
+
+        const url = `/api/aws/billing?month=${month}`;
+        console.log('[AWS][Billing] Fetching', url);
+
+        const res = await fetch(url, {
           cache: 'no-store',
         });
 
-        const text =
-          (await res.text().catch(() => '')) ||
-          '';
-
-        let json: AwsBillingPayload | null = null;
-        try {
-          json = text
-            ? (JSON.parse(
-                text,
-              ) as AwsBillingPayload)
-            : null;
-        } catch {
+        if (!res.ok) {
+          const text =
+            (await res.text().catch(() => '')) ||
+            '<sin cuerpo>';
           console.error(
-            '[AWS][Billing] Respuesta no JSON:',
+            '[AWS][Billing] HTTP error:',
+            res.status,
             text,
           );
+          if (!cancel)
+            setError(`HTTP ${res.status}`);
           return;
         }
 
+        const json =
+          (await res.json()) as AwsBillingPayload;
         console.log(
-          '[AWS][Billing] Raw response:',
+          '[AWS][Billing] Payload:',
           json,
         );
 
-        if (!json || json.ok === false) {
-          console.error(
-            '[AWS][Billing] Error:',
-            json?.error ||
-              'Unknown billing error',
-          );
+        if (!json.ok) {
+          if (!cancel)
+            setError(
+              json.error ||
+                'Unknown billing error',
+            );
           return;
         }
 
-        if (cancel) return;
-
-        console.log(
-          `[AWS][Billing] Period ${json.start} → ${json.end} | Total: $${json.totalUsd.toFixed(
-            2,
-          )} ${json.currency}`,
-        );
-
-        console.log(
-          '[AWS][Billing] Top services:',
-        );
-        (json.topServices || []).forEach(
-          (s, idx) => {
-            console.log(
-              `${idx + 1}. ${
-                s.service
-              }: $${s.amount.toFixed(
-                2,
-              )} ${s.unit}`,
-            );
-          },
-        );
+        if (!cancel) setData(json);
       } catch (e) {
         console.error(
-          '[AWS][Billing] Error /api/aws/billing:',
+          '[AWS][Billing] Error:',
           e,
         );
+        if (!cancel)
+          setError(
+            'Failed to fetch AWS billing',
+          );
+      } finally {
+        if (!cancel) setLoading(false);
       }
     };
 
@@ -619,7 +642,9 @@ function useAwsBillingConsoleLog() {
     return () => {
       cancel = true;
     };
-  }, []);
+  }, [month]);
+
+  return { data, loading, error };
 }
 
 /* =========================
@@ -627,96 +652,70 @@ function useAwsBillingConsoleLog() {
  * ========================= */
 
 export default function UsagePage() {
-  const [client, setClient] =
-    useState<string>('all');
-  const [date, setDate] = useState<
-    'live' | string
-  >('live');
+  const [client, setClient] = useState<string>('all');
+  const [date, setDate] = useState<'live' | string>('live');
+
+  const [billingMonth, setBillingMonth] = useState<string>(
+    getDefaultBillingMonth(),
+  );
 
   const availableDates = useUsageDates();
-  const {
-    data,
-    loading,
-    error,
-  } = useMetrics(date);
+  const { data, loading, error } = useMetrics(date);
   const {
     series: historySeries,
     loading: historyLoading,
-  } = useHistorySeries(
-    availableDates,
-    client,
-  );
+  } = useHistorySeries(availableDates, client);
   const {
     summary: awsSummary,
     loading: awsLoading,
     error: awsError,
   } = useAwsEc2Summary();
+  const {
+    data: billing,
+    loading: billingLoading,
+    error: billingError,
+  } = useAwsBilling(billingMonth);
 
-  // Solo logs, no UI obligatoria
-  useAwsBillingConsoleLog();
+  const monthOptions = useMemo(
+    () => getRecentMonths(12),
+    [],
+  );
 
-  /* Derived data */
+  /* Derived data: tenants */
 
   const clients = useMemo(
     () => ['all', ...(data?.clients ?? [])],
     [data],
   );
 
-  const selectedAgg = useMemo(
-    () => {
-      if (!data) return [];
-      return client === 'all'
-        ? data.client_agg
-        : data.client_agg.filter(
-            (a) => a.client === client,
-          );
-    },
-    [data, client],
-  );
+  const selectedAgg = useMemo(() => {
+    if (!data) return [];
+    return client === 'all'
+      ? data.client_agg
+      : data.client_agg.filter((a) => a.client === client);
+  }, [data, client]);
 
-  const visibleContainers =
-    useMemo<Container[]>(() => {
-      if (!data) return [];
-      const list =
-        client === 'all'
-          ? data.containers
-          : data.containers.filter(
-              (c) =>
-                c.client === client,
-            );
-      return list
-        .slice()
-        .sort((a, b) => {
-          const ca =
-            a.client.localeCompare(
-              b.client,
-            );
-          if (ca !== 0) return ca;
-          const ra =
-            a.role.localeCompare(
-              b.role,
-            );
-          if (ra !== 0) return ra;
-          return pickName(a).localeCompare(
-            pickName(b),
-          );
-        });
-    }, [data, client]);
+  const visibleContainers = useMemo<Container[]>(() => {
+    if (!data) return [];
+    const list =
+      client === 'all'
+        ? data.containers
+        : data.containers.filter((c) => c.client === client);
+    return list.slice().sort((a, b) => {
+      const ca = a.client.localeCompare(b.client);
+      if (ca !== 0) return ca;
+      const ra = a.role.localeCompare(b.role);
+      if (ra !== 0) return ra;
+      return pickName(a).localeCompare(pickName(b));
+    });
+  }, [data, client]);
 
-  const filteredHistory = useMemo(
-    () => {
-      if (
-        date === 'live' ||
-        historySeries.length === 0
-      ) {
-        return historySeries;
-      }
-      return historySeries.filter(
-        (x) => x.date <= date,
-      );
-    },
-    [historySeries, date],
-  );
+  const filteredHistory = useMemo(() => {
+    if (date === 'live' || historySeries.length === 0) {
+      return historySeries;
+    }
+    return historySeries.filter((x) => x.date <= date);
+  }, [historySeries, date]);
 
   /* Handlers */
 
@@ -724,10 +723,12 @@ export default function UsagePage() {
     (v: string) => setClient(v),
     [],
   );
-
   const onDateChange = useCallback(
-    (v: string) =>
-      setDate(v as 'live' | string),
+    (v: string) => setDate(v as 'live' | string),
+    [],
+  );
+  const onBillingMonthChange = useCallback(
+    (v: string) => setBillingMonth(v),
     [],
   );
 
@@ -740,7 +741,7 @@ export default function UsagePage() {
     >
       <PageHeader
         title="Usage Administration"
-        description="Per-client Docker metrics with a daily snapshot history."
+        description="Per-client Docker metrics, AWS usage, and monthly billing."
       >
         <div className="flex flex-wrap items-center gap-2">
           {/* Client filter */}
@@ -812,9 +813,7 @@ export default function UsagePage() {
               variant="outline"
               className="border-green-500/50 text-green-600"
             >
-              Docker OK (
-              {data.docker.server_version}
-              )
+              Docker OK ({data.docker.server_version})
             </Badge>
           ) : (
             <Badge
@@ -826,14 +825,12 @@ export default function UsagePage() {
           )}
 
           {/* Latest snapshot date */}
-          {availableDates.length >
-            0 && (
+          {availableDates.length > 0 && (
             <span className="text-xs text-muted-foreground">
               Updated:{' '}
               {
                 availableDates[
-                  availableDates.length -
-                    1
+                  availableDates.length - 1
                 ]
               }
             </span>
@@ -854,402 +851,435 @@ export default function UsagePage() {
       </PageHeader>
 
       <div className="space-y-6">
-        {/* AWS EC2 Overview */}
-        {awsSummary && (
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                AWS EC2 Overview
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-6 text-sm">
-              <div>
-                <div className="text-muted-foreground">
-                  Total instances
-                </div>
-                <div className="font-semibold">
-                  {awsSummary.total}
-                </div>
-              </div>
-              <div>
-                <div className="text-muted-foreground">
-                  Running
-                </div>
-                <div className="font-semibold text-green-600">
-                  {
-                    awsSummary.running
-                  }
-                </div>
-              </div>
-              <div>
-                <div className="text-muted-foreground">
-                  Stopped
-                </div>
-                <div className="font-semibold text-red-600">
-                  {
-                    awsSummary.stopped
-                  }
-                </div>
-              </div>
-              {awsLoading && (
-                <div className="text-xs text-muted-foreground">
-                  Loading AWS…
-                </div>
-              )}
-              {awsError && (
-                <div className="text-xs text-destructive">
-                  AWS error:{' '}
-                  {awsError}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Historical CPU/RAM */}
-        {historySeries.length >
-          0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                {resolveClientName(
-                  client,
-                  data?.client_display,
-                )}{' '}
-                – CPU% and RAM% (latest
-                snapshots)
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="h-[320px]">
-              <ResponsiveContainer
-                width="100%"
-                height="100%"
-              >
-                <LineChart
-                  data={
-                    filteredHistory
-                  }
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                  />
-                  <XAxis dataKey="date" />
-                  <YAxis
-                    yAxisId="left"
-                    domain={[0, 'auto']}
-                    tickFormatter={(
-                      v,
-                    ) => `${v}%`}
-                  />
-                  <YAxis
-                    yAxisId="right"
-                    orientation="right"
-                    domain={[0, 'auto']}
-                    tickFormatter={(
-                      v,
-                    ) => `${v}%`}
-                  />
-                  <RechartsTooltip
-                    formatter={(
-                      v: unknown,
-                    ) =>
-                      `${v}%`
-                    }
-                  />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="cpu"
-                    name="CPU %"
-                    yAxisId="left"
-                    dot={false}
-                    strokeWidth={
-                      2
-                    }
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="ram"
-                    name="RAM %"
-                    yAxisId="right"
-                    dot={false}
-                    strokeWidth={
-                      2
-                    }
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-              {historyLoading && (
-                <div className="mt-2 text-xs text-muted-foreground">
-                  Loading history…
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Client aggregates */}
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Client Aggregates
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {selectedAgg.map(
-              (a) => {
-                const memPct =
-                  percent(
-                    a.mem_used_bytes_sum,
-                    a.mem_limit_bytes_sum,
-                  );
-                return (
-                  <div
-                    key={
-                      a.client
-                    }
-                    className="space-y-2 rounded-xl border p-4"
-                  >
-                    <div className="flex items-center justify-between">
+        <Accordion
+          type="multiple"
+          defaultValue={['aws', 'tenants']}
+          className="space-y-4"
+        >
+          {/* ================= AWS USAGE & BILLING ================= */}
+          <AccordionItem value="aws">
+            <AccordionTrigger className="text-lg font-semibold">
+              AWS Usage & Billing
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pt-2">
+              {/* EC2 Overview */}
+              {awsSummary && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>
+                      AWS EC2 Overview
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="flex flex-wrap gap-6 text-sm">
+                    <div>
+                      <div className="text-muted-foreground">
+                        Total instances
+                      </div>
                       <div className="font-semibold">
-                        {resolveClientName(
-                          a.client,
-                          data?.client_display,
-                        )}
-                      </div>
-                      <Badge variant="outline">
-                        {
-                          a.containers
-                        }{' '}
-                        containers
-                      </Badge>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <div className="text-muted-foreground">
-                          CPU (sum)
-                        </div>
-                        <div className="font-medium">
-                          {fmtNum(
-                            a.cpu_percent_sum,
-                          )}
-                          %
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">
-                          RAM
-                        </div>
-                        <div className="font-medium">
-                          {fmtBytes(
-                            a.mem_used_bytes_sum,
-                          )}{' '}
-                          /{' '}
-                          {fmtBytes(
-                            a.mem_limit_bytes_sum,
-                          )}{' '}
-                          (
-                          {
-                            memPct
-                          }
-                          )
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">
-                          Net RX
-                        </div>
-                        <div className="font-medium">
-                          {fmtBytes(
-                            a.net_rx_bytes_sum,
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">
-                          Net TX
-                        </div>
-                        <div className="font-medium">
-                          {fmtBytes(
-                            a.net_tx_bytes_sum,
-                          )}
-                        </div>
+                        {awsSummary.total}
                       </div>
                     </div>
-                  </div>
-                );
-              },
-            )}
-            {selectedAgg.length ===
-              0 && (
-              <div className="text-sm text-muted-foreground">
-                No data.
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                    <div>
+                      <div className="text-muted-foreground">
+                        Running
+                      </div>
+                      <div className="font-semibold text-green-600">
+                        {awsSummary.running}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">
+                        Stopped
+                      </div>
+                      <div className="font-semibold text-red-600">
+                        {awsSummary.stopped}
+                      </div>
+                    </div>
+                    {awsLoading && (
+                      <div className="text-xs text-muted-foreground">
+                        Loading AWS…
+                      </div>
+                    )}
+                    {awsError && (
+                      <div className="text-xs text-destructive">
+                        AWS error: {awsError}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
 
-        {/* Containers table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Containers
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>
-                    Container
-                  </TableHead>
-                  <TableHead>
-                    Client
-                  </TableHead>
-                  <TableHead>
-                    Role
-                  </TableHead>
-                  <TableHead className="text-right">
-                    CPU%
-                  </TableHead>
-                  <TableHead className="text-right">
-                    RAM
-                  </TableHead>
-                  <TableHead className="text-right">
-                    Net RX / TX
-                  </TableHead>
-                  <TableHead className="text-right">
-                    PIDs
-                  </TableHead>
-                  <TableHead>
-                    Ports
-                  </TableHead>
-                  <TableHead>
-                    Status
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {visibleContainers.map(
-                  (c) => {
-                    const ram = `${fmtBytes(
-                      c.stats
-                        .mem_used_bytes,
-                    )} / ${fmtBytes(
-                      c.stats
-                        .mem_limit_bytes,
-                    )} (${fmtNum(
-                      c.stats
-                        .mem_percent,
-                    )}%)`;
-                    const net = `${fmtBytes(
-                      c.stats
-                        .net_rx_bytes,
-                    )} / ${fmtBytes(
-                      c.stats
-                        .net_tx_bytes,
-                    )}`;
-                    return (
-                      <TableRow
-                        key={
-                          c.id
-                        }
-                      >
-                        <TableCell className="font-mono text-xs">
-                          {pickName(
-                            c,
-                          )}
-                          <div className="text-[10px] text-muted-foreground">
-                            {pickImage(
-                              c,
-                            )}
+              {/* Billing mensual con month picker */}
+              <Card>
+                <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <CardTitle>AWS Monthly Billing</CardTitle>
+                    <p className="text-xs text-muted-foreground">
+                      Selecciona un mes para ver el total y los servicios que más consumen.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      Month
+                    </span>
+                    <Select
+                      value={billingMonth}
+                      onValueChange={onBillingMonthChange}
+                    >
+                      <SelectTrigger className="w-[130px]" aria-label="Select billing month">
+                        <SelectValue placeholder="YYYY-MM" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {monthOptions.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {formatMonthLabel(m)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {billingLoading && (
+                    <div className="text-xs text-muted-foreground">
+                      Loading billing…
+                    </div>
+                  )}
+
+                  {billingError && (
+                    <div className="text-xs text-destructive">
+                      Billing error: {billingError}
+                    </div>
+                  )}
+
+                  {billing && !billingLoading && !billingError && (
+                    <>
+                      <div className="flex flex-wrap items-baseline gap-4">
+                        <div>
+                          <div className="text-muted-foreground text-xs">
+                            Period
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline">
+                          <div className="font-medium">
+                            {billing.start} → {billing.end}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-muted-foreground text-xs">
+                            Total billed
+                          </div>
+                          <div className="text-2xl font-semibold">
+                            ${billing.totalUsd.toFixed(2)}{' '}
+                            <span className="text-xs font-normal text-muted-foreground">
+                              {billing.currency}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {billing.topServices?.length > 0 && (
+                        <div className="mt-2">
+                          <div className="mb-1 text-xs text-muted-foreground">
+                            Top services by cost
+                          </div>
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Service</TableHead>
+                                <TableHead className="text-right">
+                                  Amount ({billing.currency})
+                                </TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {billing.topServices.map((s) => (
+                                <TableRow key={s.service}>
+                                  <TableCell>{s.service}</TableCell>
+                                  <TableCell className="text-right">
+                                    ${fmtNum(s.amount)}
+                                  </TableCell>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {!billing && !billingLoading && !billingError && (
+                    <div className="text-xs text-muted-foreground">
+                      No billing data for this month.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* ================= TENANTS USAGE ================= */}
+          <AccordionItem value="tenants">
+            <AccordionTrigger className="text-lg font-semibold">
+              Tenants Usage
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pt-2">
+              {/* Historical CPU/RAM */}
+              {historySeries.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>
+                      {resolveClientName(
+                        client,
+                        data?.client_display,
+                      )}{' '}
+                      – CPU% and RAM% (latest snapshots)
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="h-[320px]">
+                    <ResponsiveContainer
+                      width="100%"
+                      height="100%"
+                    >
+                      <LineChart data={filteredHistory}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="date" />
+                        <YAxis
+                          yAxisId="left"
+                          domain={[0, 'auto']}
+                          tickFormatter={(v) => `${v}%`}
+                        />
+                        <YAxis
+                          yAxisId="right"
+                          orientation="right"
+                          domain={[0, 'auto']}
+                          tickFormatter={(v) => `${v}%`}
+                        />
+                        <RechartsTooltip
+                          formatter={(v: unknown) => `${v}%`}
+                        />
+                        <Legend />
+                        <Line
+                          type="monotone"
+                          dataKey="cpu"
+                          name="CPU %"
+                          yAxisId="left"
+                          dot={false}
+                          strokeWidth={2}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="ram"
+                          name="RAM %"
+                          yAxisId="right"
+                          dot={false}
+                          strokeWidth={2}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                    {historyLoading && (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        Loading history…
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Client aggregates */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Client Aggregates</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {selectedAgg.map((a) => {
+                    const memPct = percent(
+                      a.mem_used_bytes_sum,
+                      a.mem_limit_bytes_sum,
+                    );
+                    return (
+                      <div
+                        key={a.client}
+                        className="space-y-2 rounded-xl border p-4"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="font-semibold">
                             {resolveClientName(
-                              c.client,
+                              a.client,
                               data?.client_display,
                             )}
+                          </div>
+                          <Badge variant="outline">
+                            {a.containers} containers
                           </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {
-                            c.role
-                          }
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {fmtNum(
-                            c.stats
-                              .cpu_percent,
-                          )}
-                          %
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {
-                            ram
-                          }
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {
-                            net
-                          }
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {
-                            c
-                              .stats
-                              .pids
-                          }
-                        </TableCell>
-                        <TableCell
-                          className="max-w-[320px] truncate"
-                          title={pickPorts(
-                            c,
-                          )}
-                        >
-                          {pickPorts(
-                            c,
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <span className="text-xs">
-                            {pickStatus(
-                              c,
-                            )}
-                          </span>
-                          {c.tls
-                            .exposes_443 && (
-                            <Badge
-                              className="ml-2"
-                              variant="outline"
-                            >
-                              TLS/443
-                            </Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div>
+                            <div className="text-muted-foreground">
+                              CPU (sum)
+                            </div>
+                            <div className="font-medium">
+                              {fmtNum(a.cpu_percent_sum)}%
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-muted-foreground">
+                              RAM
+                            </div>
+                            <div className="font-medium">
+                              {fmtBytes(
+                                a.mem_used_bytes_sum,
+                              )}{' '}
+                              /{' '}
+                              {fmtBytes(
+                                a.mem_limit_bytes_sum,
+                              )}{' '}
+                              ({memPct})
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-muted-foreground">
+                              Net RX
+                            </div>
+                            <div className="font-medium">
+                              {fmtBytes(
+                                a.net_rx_bytes_sum,
+                              )}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-muted-foreground">
+                              Net TX
+                            </div>
+                            <div className="font-medium">
+                              {fmtBytes(
+                                a.net_tx_bytes_sum,
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     );
-                  },
-                )}
-                {visibleContainers.length ===
-                  0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={
-                        9
-                      }
-                      className="text-center text-sm text-muted-foreground"
-                    >
-                      No containers for
-                      this filter.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                  })}
+                  {selectedAgg.length === 0 && (
+                    <div className="text-sm text-muted-foreground">
+                      No data.
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Containers table */}
+              <Card>
+                <CardHeader>
+                  <CardTitle>Containers</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Container</TableHead>
+                        <TableHead>Client</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead className="text-right">
+                          CPU%
+                        </TableHead>
+                        <TableHead className="text-right">
+                          RAM
+                        </TableHead>
+                        <TableHead className="text-right">
+                          Net RX / TX
+                        </TableHead>
+                        <TableHead className="text-right">
+                          PIDs
+                        </TableHead>
+                        <TableHead>Ports</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {visibleContainers.map((c) => {
+                        const ram = `${fmtBytes(
+                          c.stats.mem_used_bytes,
+                        )} / ${fmtBytes(
+                          c.stats.mem_limit_bytes,
+                        )} (${fmtNum(
+                          c.stats.mem_percent,
+                        )}%)`;
+                        const net = `${fmtBytes(
+                          c.stats.net_rx_bytes,
+                        )} / ${fmtBytes(
+                          c.stats.net_tx_bytes,
+                        )}`;
+                        return (
+                          <TableRow key={c.id}>
+                            <TableCell className="font-mono text-xs">
+                              {pickName(c)}
+                              <div className="text-[10px] text-muted-foreground">
+                                {pickImage(c)}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline">
+                                {resolveClientName(
+                                  c.client,
+                                  data?.client_display,
+                                )}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{c.role}</TableCell>
+                            <TableCell className="text-right">
+                              {fmtNum(
+                                c.stats.cpu_percent,
+                              )}
+                              %
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {ram}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {net}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {c.stats.pids}
+                            </TableCell>
+                            <TableCell
+                              className="max-w-[320px] truncate"
+                              title={pickPorts(c)}
+                            >
+                              {pickPorts(c)}
+                            </TableCell>
+                            <TableCell>
+                              <span className="text-xs">
+                                {pickStatus(c)}
+                              </span>
+                              {c.tls.exposes_443 && (
+                                <Badge
+                                  className="ml-2"
+                                  variant="outline"
+                                >
+                                  TLS/443
+                                </Badge>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      {visibleContainers.length === 0 && (
+                        <TableRow>
+                          <TableCell
+                            colSpan={9}
+                            className="text-center text-sm text-muted-foreground"
+                          >
+                            No containers for this filter.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </div>
     </ProtectedComponent>
   );
