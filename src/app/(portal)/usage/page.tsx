@@ -1,14 +1,42 @@
 // src/app/(portal)/usage/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+} from 'react';
+
 import { PageHeader } from '@/components/page-header';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+} from '@/components/ui/card';
+import {
+  Table,
+  TableHeader,
+  TableRow,
+  TableHead,
+  TableBody,
+  TableCell,
+} from '@/components/ui/table';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission';
+import {
+  ProtectedComponent,
+  AccessDeniedFallback,
+} from '@/hooks/use-permission';
+
 import {
   ResponsiveContainer,
   LineChart,
@@ -21,7 +49,7 @@ import {
 } from 'recharts';
 
 /* =========================
- * Types
+ * Types: Metrics / Docker
  * ========================= */
 
 type PortBinding = {
@@ -85,8 +113,12 @@ type MetricsPayload = {
   containers: Container[];
   clients: string[];
   client_agg: ClientAgg[];
-  client_display?: Record<string, string>; // { rawClientKey: displayName }
+  client_display?: Record<string, string>;
 };
+
+/* =========================
+ * Types: AWS / Billing
+ * ========================= */
 
 type AwsInstance = {
   instanceId?: string;
@@ -97,53 +129,53 @@ type AwsInstance = {
   az?: string | null;
 };
 
-type AwsPayload =
-  | {
-    ok: true;
-    count: number;
-    instances: AwsInstance[];
-  }
-  | {
-    ok: false;
-    error: string;
-  };
+type AwsPayloadOk = {
+  ok: true;
+  count: number;
+  instances: AwsInstance[];
+};
+
+type AwsPayloadError = {
+  ok: false;
+  error: string;
+};
+
+type AwsPayload = AwsPayloadOk | AwsPayloadError;
+
+type AwsBillingService = {
+  service: string;
+  amount: number;
+  unit: string;
+};
+
+type AwsBillingOk = {
+  ok: true;
+  start: string;
+  end: string;
+  totalUsd: number;
+  currency: string;
+  topServices: AwsBillingService[];
+  allServices: AwsBillingService[];
+};
+
+type AwsBillingError = {
+  ok: false;
+  error: string;
+};
+
+type AwsBillingPayload = AwsBillingOk | AwsBillingError;
 
 /* =========================
  * Format helpers
  * ========================= */
 
-const labelHasAny = (labels: Record<string, string> | undefined, prefixes: string[]) => {
-  if (!labels) return false;
-  const keys = Object.keys(labels);
-  return keys.some((k) => prefixes.some((p) => k.startsWith(p)));
-};
-
-const pickPorts = (c: Container) => {
-  if (Array.isArray(c.ports) && c.ports.length > 0) {
-    const published = [
-      ...new Set(
-        c.ports
-          .filter((p) => p.host_port)
-          .map((p) => `${p.host_ip ?? '*'}:${p.host_port} -> ${p.container}`),
-      ),
-    ];
-    const exposed = [
-      ...new Set(c.ports.filter((p) => !p.host_port).map((p) => p.container)),
-    ];
-    if (published.length && exposed.length) {
-      return `${published.join(', ')} (exposed: ${exposed.join(', ')})`;
-    }
-    if (published.length) return published.join(', ');
-    if (exposed.length) return exposed.join(', ');
-  }
-  const raw = (c.ports_list ?? '').trim();
-  return raw || '—';
-};
+const coalesce = (...vals: (string | null | undefined)[]) =>
+  vals.find((v) => !!v && v.trim().length > 0)?.trim() ?? '';
 
 const fmtNum = (n: number) =>
-  new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(
-    Number.isFinite(n) ? n : 0,
-  );
+  new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(n) ? n : 0);
 
 const fmtBytes = (bytes: number) => {
   const b = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
@@ -161,9 +193,6 @@ const percent = (num: number, den: number) => {
   return `${fmtNum((num / den) * 100)}%`;
 };
 
-const coalesce = (...vals: (string | undefined | null)[]) =>
-  vals.find((v) => !!v && v.trim().length > 0)?.trim() ?? '';
-
 const fmtDuration = (sec?: number | null) => {
   if (sec == null || sec < 0) return '';
   const d = Math.floor(sec / 86400);
@@ -174,10 +203,6 @@ const fmtDuration = (sec?: number | null) => {
   return `${m}m`;
 };
 
-/* =========================
- * Snapshot fallbacks
- * ========================= */
-
 const pickName = (c: Container) => {
   const fromLabel = c.labels?.['com.docker.compose.service'];
   const fromNetworks = Object.values(c.networks ?? {})
@@ -187,7 +212,13 @@ const pickName = (c: Container) => {
     c.role && c.client && c.role !== 'unknown'
       ? `vivace-${c.role}-${c.client}`
       : '';
-  return coalesce(c.name, fromLabel, fromNetworks, fromRole, c.id?.slice(0, 12));
+  return coalesce(
+    c.name,
+    fromLabel,
+    fromNetworks,
+    fromRole,
+    c.id?.slice(0, 12),
+  );
 };
 
 const pickImage = (c: Container) => coalesce(c.image) || '(unknown)';
@@ -199,200 +230,143 @@ const pickStatus = (c: Container) => {
   return up ? `Up ${up}` : '—';
 };
 
-/* =========================
- * Client display helper
- * ========================= */
+const pickPorts = (c: Container) => {
+  if (Array.isArray(c.ports) && c.ports.length > 0) {
+    const published = [
+      ...new Set(
+        c.ports
+          .filter((p) => p.host_port)
+          .map(
+            (p) =>
+              `${p.host_ip ?? '*'}:${p.host_port} -> ${p.container}`,
+          ),
+      ),
+    ];
+    const exposed = [
+      ...new Set(
+        c.ports
+          .filter((p) => !p.host_port)
+          .map((p) => p.container),
+      ),
+    ];
 
-const resolveClientName = (id: string, map?: Record<string, string>) => {
+    if (published.length && exposed.length) {
+      return `${published.join(', ')} (exposed: ${exposed.join(', ')})`;
+    }
+    if (published.length) return published.join(', ');
+    if (exposed.length) return exposed.join(', ');
+  }
+
+  const raw = (c.ports_list ?? '').trim();
+  return raw || '—';
+};
+
+const resolveClientName = (
+  id: string,
+  map?: Record<string, string>,
+) => {
   if (id === 'all') return 'All Clients';
   return map?.[id] || id;
 };
 
 /* =========================
- * Component
+ * Custom hooks
  * ========================= */
 
-export default function UsagePage() {
-  const [client, setClient] = useState<string>('all');
-  const [date, setDate] = useState<'live' | string>('live');
-
-  const [data, setData] = useState<MetricsPayload | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const [availableDates, setAvailableDates] = useState<string[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historySeries, setHistorySeries] = useState<
-    Array<{ date: string; cpu: number; ram: number }>
-  >([]);
-
-  // AWS state (opcional, además de logs en consola)
-  const [awsLoading, setAwsLoading] = useState(false);
-  const [awsError, setAwsError] = useState<string | null>(null);
-  const [awsSummary, setAwsSummary] = useState<{
-    total: number;
-    running: number;
-    stopped: number;
-  } | null>(null);
-
-  /* =========================
-   * Fetch AWS (/aws)
-   * ========================= */
+/** Fechas disponibles para snapshots (/api/usage/dates). */
+function useUsageDates() {
+  const [dates, setDates] = useState<string[]>([]);
 
   useEffect(() => {
-    const fetchAwsData = async () => {
-      try {
-        setAwsLoading(true);
-        setAwsError(null);
-
-        console.log('[AWS][UsagePage] Fetching /aws...');
-        const res = await fetch('/api/aws', { cache: 'no-store' });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          console.error(
-            '[AWS][UsagePage] Error HTTP al consultar /aws:',
-            res.status,
-            text || '<sin cuerpo>',
-          );
-          setAwsError(`HTTP ${res.status}`);
-          return;
-        }
-
-        const json = (await res.json()) as AwsPayload;
-        console.log('[AWS][UsagePage] Payload desde /aws:', json);
-
-        if (!json.ok) {
-          setAwsError(json.error ?? 'Unknown AWS error');
-          return;
-        }
-
-        const instances = json.instances ?? [];
-        const total = instances.length;
-        const running = instances.filter(
-          (i) => i.state === 'running',
-        ).length;
-        const stopped = instances.filter(
-          (i) => i.state === 'stopped',
-        ).length;
-
-        setAwsSummary({ total, running, stopped });
-      } catch (err) {
-        console.error('[AWS][UsagePage] Error al llamar /aws:', err);
-        setAwsError('Failed to fetch AWS data');
-      } finally {
-        setAwsLoading(false);
-      }
-    };
-
-    fetchAwsData();
-  }, []);
-
-  /* =========================
-   * Available dates
-   * ========================= */
-
-  useEffect(() => {
-    let alive = true;
+    let cancel = false;
 
     (async () => {
       try {
-        const res = await fetch('/api/usage/dates', { cache: 'no-store' });
+        const res = await fetch('/api/usage/dates', {
+          cache: 'no-store',
+        });
         if (!res.ok) return;
         const j = await res.json();
-        const dates: string[] = (j?.dates ?? []).filter(Boolean).sort();
-        if (alive) setAvailableDates(dates);
+        const list: string[] = (j?.dates ?? [])
+          .filter(Boolean)
+          .sort();
+        if (!cancel) setDates(list);
       } catch {
-        // noop
+        // silencioso
       }
     })();
 
     return () => {
-      alive = false;
+      cancel = true;
     };
   }, []);
 
-  /* =========================
-   * Load metrics (live or snapshot)
-   * ========================= */
+  return dates;
+}
+
+/** Métricas live o snapshot (/api/usage). Incluye auto-refresh en live. */
+function useMetrics(date: 'live' | string) {
+  const [data, setData] = useState<MetricsPayload | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let alive = true;
+    let cancel = false;
 
     const load = async () => {
       try {
         setLoading(true);
         const url =
-          date === 'live' ? '/api/usage' : `/api/usage?date=${date}`;
+          date === 'live'
+            ? '/api/usage'
+            : `/api/usage?date=${date}`;
         const res = await fetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as MetricsPayload;
-        if (alive) {
+        if (!cancel) {
           setData(json);
           setError(null);
         }
-      } catch (e: unknown) {
+      } catch (e) {
         const err = e as Error;
-        if (alive) {
-          setError(err?.message ?? 'fetch_failed');
+        if (!cancel) {
           setData(null);
+          setError(err.message || 'fetch_failed');
         }
       } finally {
-        if (alive) setLoading(false);
+        if (!cancel) setLoading(false);
       }
     };
 
     load();
 
-    let id: ReturnType<typeof setInterval> | undefined;
+    let interval: ReturnType<typeof setInterval> | undefined;
     if (date === 'live') {
-      id = setInterval(load, 10_000);
+      interval = setInterval(load, 10_000);
     }
 
     return () => {
-      alive = false;
-      if (id) clearInterval(id);
+      cancel = true;
+      if (interval) clearInterval(interval);
     };
   }, [date]);
 
-  /* =========================
-   * Derived data
-   * ========================= */
+  return { data, loading, error };
+}
 
-  const clients = useMemo(
-    () => ['all', ...(data?.clients ?? [])],
-    [data],
-  );
-
-  const selectedAgg = useMemo(() => {
-    if (!data) return [];
-    return client === 'all'
-      ? data.client_agg
-      : data.client_agg.filter((a) => a.client === client);
-  }, [data, client]);
-
-  const visibleContainers = useMemo<Container[]>(() => {
-    if (!data) return [];
-    const list =
-      client === 'all'
-        ? data.containers
-        : data.containers.filter((c) => c.client === client);
-    return list.slice().sort((a, b) => {
-      const ca = a.client.localeCompare(b.client);
-      if (ca !== 0) return ca;
-      const ra = a.role.localeCompare(b.role);
-      if (ra !== 0) return ra;
-      return pickName(a).localeCompare(pickName(b));
-    });
-  }, [data, client]);
-
-  /* =========================
-   * Historical CPU/RAM series
-   * ========================= */
+/** Historial CPU/RAM basado en snapshots recientes. */
+function useHistorySeries(
+  availableDates: string[],
+  client: string,
+) {
+  const [series, setSeries] = useState<
+    Array<{ date: string; cpu: number; ram: number }>
+  >([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (availableDates.length === 0) {
-      setHistorySeries([]);
+    if (!availableDates.length) {
+      setSeries([]);
       return;
     }
 
@@ -400,48 +374,60 @@ export default function UsagePage() {
     let cancel = false;
 
     (async () => {
-      setHistoryLoading(true);
+      setLoading(true);
       try {
         const results = await Promise.all(
           lastDates.map(async (d) => {
-            const r = await fetch(`/api/usage?date=${d}`, {
+            const res = await fetch(`/api/usage?date=${d}`, {
               cache: 'no-store',
             });
-            if (!r.ok) return null;
-            const j = (await r.json()) as MetricsPayload;
-            return { date: d, payload: j };
+            if (!res.ok) return null;
+            const payload =
+              (await res.json()) as MetricsPayload;
+            return { date: d, payload };
           }),
         );
 
         if (cancel) return;
 
-        const series = results
+        const next = (results || [])
           .filter(
             (
               x,
-            ): x is { date: string; payload: MetricsPayload } => !!x,
+            ): x is {
+              date: string;
+              payload: MetricsPayload;
+            } => !!x,
           )
           .map(({ date, payload }) => {
             const aggs =
               client === 'all'
                 ? payload.client_agg
                 : payload.client_agg.filter(
-                  (a) => a.client === client,
-                );
+                    (a) => a.client === client,
+                  );
             const cpu = aggs.reduce(
-              (acc, a) => acc + (a.cpu_percent_sum || 0),
+              (acc, a) =>
+                acc + (a.cpu_percent_sum || 0),
               0,
             );
             const memUsed = aggs.reduce(
-              (acc, a) => acc + (a.mem_used_bytes_sum || 0),
+              (acc, a) =>
+                acc +
+                (a.mem_used_bytes_sum || 0),
               0,
             );
             const memLimit = aggs.reduce(
-              (acc, a) => acc + (a.mem_limit_bytes_sum || 0),
+              (acc, a) =>
+                acc +
+                (a.mem_limit_bytes_sum || 0),
               0,
             );
             const ramPct =
-              memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
+              memLimit > 0
+                ? (memUsed / memLimit) * 100
+                : 0;
+
             return {
               date,
               cpu: Number(cpu.toFixed(2)),
@@ -449,9 +435,9 @@ export default function UsagePage() {
             };
           });
 
-        setHistorySeries(series);
+        setSeries(next);
       } finally {
-        if (!cancel) setHistoryLoading(false);
+        if (!cancel) setLoading(false);
       }
     })();
 
@@ -460,26 +446,292 @@ export default function UsagePage() {
     };
   }, [availableDates, client]);
 
-  const filteredHistory = useMemo(() => {
-    if (date === 'live' || historySeries.length === 0) {
-      return historySeries;
-    }
-    return historySeries.filter((x) => x.date <= date);
-  }, [historySeries, date]);
+  return { series, loading };
+}
 
-  /* =========================
-   * Handlers
-   * ========================= */
+/** Llama /api/aws para obtener resumen simple de EC2 y logear payload. */
+function useAwsEc2Summary() {
+  const [summary, setSummary] = useState<{
+    total: number;
+    running: number;
+    stopped: number;
+  } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const onClientChange = useCallback((v: string) => setClient(v), []);
-  const onDateChange = useCallback(
-    (v: string) => setDate(v as 'live' | string),
+  useEffect(() => {
+    let cancel = false;
+
+    const fetchAws = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        console.log(
+          '[AWS][UsagePage] Fetching /api/aws...',
+        );
+        const res = await fetch('/api/aws', {
+          cache: 'no-store',
+        });
+
+        if (!res.ok) {
+          const text =
+            (await res.text().catch(() => '')) ||
+            '<sin cuerpo>';
+          console.error(
+            '[AWS][UsagePage] HTTP error /api/aws:',
+            res.status,
+            text,
+          );
+          if (!cancel)
+            setError(`HTTP ${res.status}`);
+          return;
+        }
+
+        const json =
+          (await res.json()) as AwsPayload;
+        console.log(
+          '[AWS][UsagePage] Payload /api/aws:',
+          json,
+        );
+
+        if (!json.ok) {
+          if (!cancel)
+            setError(
+              json.error ||
+                'Unknown AWS error',
+            );
+          return;
+        }
+
+        const instances = json.instances || [];
+        const total = instances.length;
+        const running = instances.filter(
+          (i) => i.state === 'running',
+        ).length;
+        const stopped = instances.filter(
+          (i) => i.state === 'stopped',
+        ).length;
+
+        if (!cancel)
+          setSummary({ total, running, stopped });
+      } catch (e) {
+        console.error(
+          '[AWS][UsagePage] Error /api/aws:',
+          e,
+        );
+        if (!cancel)
+          setError('Failed to fetch AWS EC2');
+      } finally {
+        if (!cancel) setLoading(false);
+      }
+    };
+
+    fetchAws();
+
+    return () => {
+      cancel = true;
+    };
+  }, []);
+
+  return { summary, loading, error };
+}
+
+/** Llama /api/aws/billing y escribe resumen bonito en consola (solo debug). */
+function useAwsBillingConsoleLog() {
+  useEffect(() => {
+    let cancel = false;
+
+    const run = async () => {
+      try {
+        console.log(
+          '[AWS][Billing] Fetching /api/aws/billing...',
+        );
+        const res = await fetch('/api/aws/billing', {
+          cache: 'no-store',
+        });
+
+        const text =
+          (await res.text().catch(() => '')) ||
+          '';
+
+        let json: AwsBillingPayload | null = null;
+        try {
+          json = text
+            ? (JSON.parse(
+                text,
+              ) as AwsBillingPayload)
+            : null;
+        } catch {
+          console.error(
+            '[AWS][Billing] Respuesta no JSON:',
+            text,
+          );
+          return;
+        }
+
+        console.log(
+          '[AWS][Billing] Raw response:',
+          json,
+        );
+
+        if (!json || json.ok === false) {
+          console.error(
+            '[AWS][Billing] Error:',
+            json?.error ||
+              'Unknown billing error',
+          );
+          return;
+        }
+
+        if (cancel) return;
+
+        console.log(
+          `[AWS][Billing] Period ${json.start} → ${json.end} | Total: $${json.totalUsd.toFixed(
+            2,
+          )} ${json.currency}`,
+        );
+
+        console.log(
+          '[AWS][Billing] Top services:',
+        );
+        (json.topServices || []).forEach(
+          (s, idx) => {
+            console.log(
+              `${idx + 1}. ${
+                s.service
+              }: $${s.amount.toFixed(
+                2,
+              )} ${s.unit}`,
+            );
+          },
+        );
+      } catch (e) {
+        console.error(
+          '[AWS][Billing] Error /api/aws/billing:',
+          e,
+        );
+      }
+    };
+
+    run();
+
+    return () => {
+      cancel = true;
+    };
+  }, []);
+}
+
+/* =========================
+ * Component
+ * ========================= */
+
+export default function UsagePage() {
+  const [client, setClient] =
+    useState<string>('all');
+  const [date, setDate] = useState<
+    'live' | string
+  >('live');
+
+  const availableDates = useUsageDates();
+  const {
+    data,
+    loading,
+    error,
+  } = useMetrics(date);
+  const {
+    series: historySeries,
+    loading: historyLoading,
+  } = useHistorySeries(
+    availableDates,
+    client,
+  );
+  const {
+    summary: awsSummary,
+    loading: awsLoading,
+    error: awsError,
+  } = useAwsEc2Summary();
+
+  // Solo logs, no UI obligatoria
+  useAwsBillingConsoleLog();
+
+  /* Derived data */
+
+  const clients = useMemo(
+    () => ['all', ...(data?.clients ?? [])],
+    [data],
+  );
+
+  const selectedAgg = useMemo(
+    () => {
+      if (!data) return [];
+      return client === 'all'
+        ? data.client_agg
+        : data.client_agg.filter(
+            (a) => a.client === client,
+          );
+    },
+    [data, client],
+  );
+
+  const visibleContainers =
+    useMemo<Container[]>(() => {
+      if (!data) return [];
+      const list =
+        client === 'all'
+          ? data.containers
+          : data.containers.filter(
+              (c) =>
+                c.client === client,
+            );
+      return list
+        .slice()
+        .sort((a, b) => {
+          const ca =
+            a.client.localeCompare(
+              b.client,
+            );
+          if (ca !== 0) return ca;
+          const ra =
+            a.role.localeCompare(
+              b.role,
+            );
+          if (ra !== 0) return ra;
+          return pickName(a).localeCompare(
+            pickName(b),
+          );
+        });
+    }, [data, client]);
+
+  const filteredHistory = useMemo(
+    () => {
+      if (
+        date === 'live' ||
+        historySeries.length === 0
+      ) {
+        return historySeries;
+      }
+      return historySeries.filter(
+        (x) => x.date <= date,
+      );
+    },
+    [historySeries, date],
+  );
+
+  /* Handlers */
+
+  const onClientChange = useCallback(
+    (v: string) => setClient(v),
     [],
   );
 
-  /* =========================
-   * Render
-   * ========================= */
+  const onDateChange = useCallback(
+    (v: string) =>
+      setDate(v as 'live' | string),
+    [],
+  );
+
+  /* Render */
 
   return (
     <ProtectedComponent
@@ -491,7 +743,11 @@ export default function UsagePage() {
         description="Per-client Docker metrics with a daily snapshot history."
       >
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={client} onValueChange={onClientChange}>
+          {/* Client filter */}
+          <Select
+            value={client}
+            onValueChange={onClientChange}
+          >
             <SelectTrigger
               className="w-[220px]"
               aria-label="Filter by client"
@@ -500,14 +756,24 @@ export default function UsagePage() {
             </SelectTrigger>
             <SelectContent>
               {clients.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {resolveClientName(c, data?.client_display)}
+                <SelectItem
+                  key={c}
+                  value={c}
+                >
+                  {resolveClientName(
+                    c,
+                    data?.client_display,
+                  )}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <Select value={date} onValueChange={onDateChange}>
+          {/* Date / snapshot selector */}
+          <Select
+            value={date}
+            onValueChange={onDateChange}
+          >
             <SelectTrigger
               className="w-[220px]"
               aria-label="Select snapshot date"
@@ -515,14 +781,20 @@ export default function UsagePage() {
               <SelectValue placeholder="Select date..." />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem key="live" value="live">
+              <SelectItem
+                key="live"
+                value="live"
+              >
                 Live (now)
               </SelectItem>
               {availableDates
                 .slice()
                 .reverse()
                 .map((d) => (
-                  <SelectItem key={d} value={d}>
+                  <SelectItem
+                    key={d}
+                    value={d}
+                  >
                     {d}
                   </SelectItem>
                 ))}
@@ -534,12 +806,15 @@ export default function UsagePage() {
             className="h-6"
           />
 
+          {/* Docker status */}
           {data?.docker?.running ? (
             <Badge
               variant="outline"
               className="border-green-500/50 text-green-600"
             >
-              Docker OK ({data.docker.server_version})
+              Docker OK (
+              {data.docker.server_version}
+              )
             </Badge>
           ) : (
             <Badge
@@ -550,12 +825,21 @@ export default function UsagePage() {
             </Badge>
           )}
 
-          {availableDates.length > 0 && (
+          {/* Latest snapshot date */}
+          {availableDates.length >
+            0 && (
             <span className="text-xs text-muted-foreground">
-              Updated: {availableDates[availableDates.length - 1]}
+              Updated:{' '}
+              {
+                availableDates[
+                  availableDates.length -
+                    1
+                ]
+              }
             </span>
           )}
 
+          {/* Loading / error */}
           {loading && (
             <span className="text-xs text-muted-foreground">
               Loading…
@@ -570,29 +854,41 @@ export default function UsagePage() {
       </PageHeader>
 
       <div className="space-y-6">
-        {/* AWS EC2 summary (opcional, basado en /aws) */}
+        {/* AWS EC2 Overview */}
         {awsSummary && (
           <Card>
             <CardHeader>
-              <CardTitle>AWS EC2 Overview</CardTitle>
+              <CardTitle>
+                AWS EC2 Overview
+              </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-6 text-sm">
               <div>
-                <div className="text-muted-foreground">Total instances</div>
+                <div className="text-muted-foreground">
+                  Total instances
+                </div>
                 <div className="font-semibold">
                   {awsSummary.total}
                 </div>
               </div>
               <div>
-                <div className="text-muted-foreground">Running</div>
+                <div className="text-muted-foreground">
+                  Running
+                </div>
                 <div className="font-semibold text-green-600">
-                  {awsSummary.running}
+                  {
+                    awsSummary.running
+                  }
                 </div>
               </div>
               <div>
-                <div className="text-muted-foreground">Stopped</div>
+                <div className="text-muted-foreground">
+                  Stopped
+                </div>
                 <div className="font-semibold text-red-600">
-                  {awsSummary.stopped}
+                  {
+                    awsSummary.stopped
+                  }
                 </div>
               </div>
               {awsLoading && (
@@ -602,14 +898,17 @@ export default function UsagePage() {
               )}
               {awsError && (
                 <div className="text-xs text-destructive">
-                  AWS error: {awsError}
+                  AWS error:{' '}
+                  {awsError}
                 </div>
               )}
             </CardContent>
           </Card>
         )}
 
-        {historySeries.length > 0 && (
+        {/* Historical CPU/RAM */}
+        {historySeries.length >
+          0 && (
           <Card>
             <CardHeader>
               <CardTitle>
@@ -617,7 +916,8 @@ export default function UsagePage() {
                   client,
                   data?.client_display,
                 )}{' '}
-                – CPU% and RAM% (latest snapshots)
+                – CPU% and RAM% (latest
+                snapshots)
               </CardTitle>
             </CardHeader>
             <CardContent className="h-[320px]">
@@ -625,22 +925,36 @@ export default function UsagePage() {
                 width="100%"
                 height="100%"
               >
-                <LineChart data={filteredHistory}>
-                  <CartesianGrid strokeDasharray="3 3" />
+                <LineChart
+                  data={
+                    filteredHistory
+                  }
+                >
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                  />
                   <XAxis dataKey="date" />
                   <YAxis
                     yAxisId="left"
                     domain={[0, 'auto']}
-                    tickFormatter={(v) => `${v}%`}
+                    tickFormatter={(
+                      v,
+                    ) => `${v}%`}
                   />
                   <YAxis
                     yAxisId="right"
                     orientation="right"
                     domain={[0, 'auto']}
-                    tickFormatter={(v) => `${v}%`}
+                    tickFormatter={(
+                      v,
+                    ) => `${v}%`}
                   />
                   <RechartsTooltip
-                    formatter={(v: unknown) => `${v}%`}
+                    formatter={(
+                      v: unknown,
+                    ) =>
+                      `${v}%`
+                    }
                   />
                   <Legend />
                   <Line
@@ -649,7 +963,9 @@ export default function UsagePage() {
                     name="CPU %"
                     yAxisId="left"
                     dot={false}
-                    strokeWidth={2}
+                    strokeWidth={
+                      2
+                    }
                   />
                   <Line
                     type="monotone"
@@ -657,7 +973,9 @@ export default function UsagePage() {
                     name="RAM %"
                     yAxisId="right"
                     dot={false}
-                    strokeWidth={2}
+                    strokeWidth={
+                      2
+                    }
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -670,81 +988,100 @@ export default function UsagePage() {
           </Card>
         )}
 
+        {/* Client aggregates */}
         <Card>
           <CardHeader>
-            <CardTitle>Client Aggregates</CardTitle>
+            <CardTitle>
+              Client Aggregates
+            </CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {selectedAgg.map((a) => {
-              const memPct = percent(
-                a.mem_used_bytes_sum,
-                a.mem_limit_bytes_sum,
-              );
-              return (
-                <div
-                  key={a.client}
-                  className="space-y-2 rounded-xl border p-4"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold">
-                      {resolveClientName(
-                        a.client,
-                        data?.client_display,
-                      )}
-                    </div>
-                    <Badge variant="outline">
-                      {a.containers} containers
-                    </Badge>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <div className="text-muted-foreground">
-                        CPU (sum)
-                      </div>
-                      <div className="font-medium">
-                        {fmtNum(a.cpu_percent_sum)}%
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">
-                        RAM
-                      </div>
-                      <div className="font-medium">
-                        {fmtBytes(
-                          a.mem_used_bytes_sum,
-                        )}{' '}
-                        /{' '}
-                        {fmtBytes(
-                          a.mem_limit_bytes_sum,
-                        )}{' '}
-                        ({memPct})
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-muted-foreground">
-                        Net RX
-                      </div>
-                      <div className="font-medium">
-                        {fmtBytes(
-                          a.net_rx_bytes_sum,
+            {selectedAgg.map(
+              (a) => {
+                const memPct =
+                  percent(
+                    a.mem_used_bytes_sum,
+                    a.mem_limit_bytes_sum,
+                  );
+                return (
+                  <div
+                    key={
+                      a.client
+                    }
+                    className="space-y-2 rounded-xl border p-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold">
+                        {resolveClientName(
+                          a.client,
+                          data?.client_display,
                         )}
                       </div>
+                      <Badge variant="outline">
+                        {
+                          a.containers
+                        }{' '}
+                        containers
+                      </Badge>
                     </div>
-                    <div>
-                      <div className="text-muted-foreground">
-                        Net TX
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <div className="text-muted-foreground">
+                          CPU (sum)
+                        </div>
+                        <div className="font-medium">
+                          {fmtNum(
+                            a.cpu_percent_sum,
+                          )}
+                          %
+                        </div>
                       </div>
-                      <div className="font-medium">
-                        {fmtBytes(
-                          a.net_tx_bytes_sum,
-                        )}
+                      <div>
+                        <div className="text-muted-foreground">
+                          RAM
+                        </div>
+                        <div className="font-medium">
+                          {fmtBytes(
+                            a.mem_used_bytes_sum,
+                          )}{' '}
+                          /{' '}
+                          {fmtBytes(
+                            a.mem_limit_bytes_sum,
+                          )}{' '}
+                          (
+                          {
+                            memPct
+                          }
+                          )
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">
+                          Net RX
+                        </div>
+                        <div className="font-medium">
+                          {fmtBytes(
+                            a.net_rx_bytes_sum,
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-muted-foreground">
+                          Net TX
+                        </div>
+                        <div className="font-medium">
+                          {fmtBytes(
+                            a.net_tx_bytes_sum,
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-            {selectedAgg.length === 0 && (
+                );
+              },
+            )}
+            {selectedAgg.length ===
+              0 && (
               <div className="text-sm text-muted-foreground">
                 No data.
               </div>
@@ -752,17 +1089,26 @@ export default function UsagePage() {
           </CardContent>
         </Card>
 
+        {/* Containers table */}
         <Card>
           <CardHeader>
-            <CardTitle>Containers</CardTitle>
+            <CardTitle>
+              Containers
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Container</TableHead>
-                  <TableHead>Client</TableHead>
-                  <TableHead>Role</TableHead>
+                  <TableHead>
+                    Container
+                  </TableHead>
+                  <TableHead>
+                    Client
+                  </TableHead>
+                  <TableHead>
+                    Role
+                  </TableHead>
                   <TableHead className="text-right">
                     CPU%
                   </TableHead>
@@ -775,85 +1121,128 @@ export default function UsagePage() {
                   <TableHead className="text-right">
                     PIDs
                   </TableHead>
-                  <TableHead>Ports</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>
+                    Ports
+                  </TableHead>
+                  <TableHead>
+                    Status
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visibleContainers.map((c) => {
-                  const ram = `${fmtBytes(
-                    c.stats.mem_used_bytes,
-                  )} / ${fmtBytes(
-                    c.stats.mem_limit_bytes,
-                  )} (${fmtNum(
-                    c.stats.mem_percent,
-                  )}%)`;
-                  const net = `${fmtBytes(
-                    c.stats.net_rx_bytes,
-                  )} / ${fmtBytes(
-                    c.stats.net_tx_bytes,
-                  )}`;
-                  return (
-                    <TableRow key={c.id}>
-                      <TableCell className="font-mono text-xs">
-                        {pickName(c)}
-                        <div className="text-[10px] text-muted-foreground">
-                          {pickImage(c)}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">
-                          {resolveClientName(
-                            c.client,
-                            data?.client_display,
-                          )}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{c.role}</TableCell>
-                      <TableCell className="text-right">
-                        {fmtNum(
-                          c.stats.cpu_percent,
-                        )}
-                        %
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {ram}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {net}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {c.stats.pids}
-                      </TableCell>
-                      <TableCell
-                        className="max-w-[320px] truncate"
-                        title={pickPorts(c)}
+                {visibleContainers.map(
+                  (c) => {
+                    const ram = `${fmtBytes(
+                      c.stats
+                        .mem_used_bytes,
+                    )} / ${fmtBytes(
+                      c.stats
+                        .mem_limit_bytes,
+                    )} (${fmtNum(
+                      c.stats
+                        .mem_percent,
+                    )}%)`;
+                    const net = `${fmtBytes(
+                      c.stats
+                        .net_rx_bytes,
+                    )} / ${fmtBytes(
+                      c.stats
+                        .net_tx_bytes,
+                    )}`;
+                    return (
+                      <TableRow
+                        key={
+                          c.id
+                        }
                       >
-                        {pickPorts(c)}
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs">
-                          {pickStatus(c)}
-                        </span>
-                        {c.tls.exposes_443 && (
-                          <Badge
-                            className="ml-2"
-                            variant="outline"
-                          >
-                            TLS/443
+                        <TableCell className="font-mono text-xs">
+                          {pickName(
+                            c,
+                          )}
+                          <div className="text-[10px] text-muted-foreground">
+                            {pickImage(
+                              c,
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">
+                            {resolveClientName(
+                              c.client,
+                              data?.client_display,
+                            )}
                           </Badge>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-                {visibleContainers.length === 0 && (
+                        </TableCell>
+                        <TableCell>
+                          {
+                            c.role
+                          }
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {fmtNum(
+                            c.stats
+                              .cpu_percent,
+                          )}
+                          %
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {
+                            ram
+                          }
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {
+                            net
+                          }
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {
+                            c
+                              .stats
+                              .pids
+                          }
+                        </TableCell>
+                        <TableCell
+                          className="max-w-[320px] truncate"
+                          title={pickPorts(
+                            c,
+                          )}
+                        >
+                          {pickPorts(
+                            c,
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs">
+                            {pickStatus(
+                              c,
+                            )}
+                          </span>
+                          {c.tls
+                            .exposes_443 && (
+                            <Badge
+                              className="ml-2"
+                              variant="outline"
+                            >
+                              TLS/443
+                            </Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  },
+                )}
+                {visibleContainers.length ===
+                  0 && (
                   <TableRow>
                     <TableCell
-                      colSpan={9}
+                      colSpan={
+                        9
+                      }
                       className="text-center text-sm text-muted-foreground"
                     >
-                      No containers for this filter.
+                      No containers for
+                      this filter.
                     </TableCell>
                   </TableRow>
                 )}
