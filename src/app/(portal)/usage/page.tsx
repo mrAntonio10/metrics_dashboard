@@ -99,14 +99,14 @@ type AwsInstance = {
 
 type AwsPayload =
   | {
-      ok: true;
-      count: number;
-      instances: AwsInstance[];
-    }
+    ok: true;
+    count: number;
+    instances: AwsInstance[];
+  }
   | {
-      ok: false;
-      error: string;
-    };
+    ok: false;
+    error: string;
+  };
 
 /* =========================
  * Format helpers
@@ -246,7 +246,7 @@ export default function UsagePage() {
         setAwsError(null);
 
         console.log('[AWS][UsagePage] Fetching /aws...');
-        const res = await fetch('/aws', { cache: 'no-store' });
+        const res = await fetch('/api/aws', { cache: 'no-store' });
 
         if (!res.ok) {
           const text = await res.text().catch(() => '');
@@ -426,8 +426,8 @@ export default function UsagePage() {
               client === 'all'
                 ? payload.client_agg
                 : payload.client_agg.filter(
-                    (a) => a.client === client,
-                  );
+                  (a) => a.client === client,
+                );
             const cpu = aggs.reduce(
               (acc, a) => acc + (a.cpu_percent_sum || 0),
               0,
