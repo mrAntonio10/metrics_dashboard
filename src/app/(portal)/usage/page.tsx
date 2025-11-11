@@ -1241,9 +1241,7 @@ export default function UsagePage() {
                       <CardTitle>
                         Anthropic Token Usage by Tenant
                       </CardTitle>
-                      <p className="text-xs text-muted-foreground">
-                        Datos obtenidos desde n8n. Filtra por tenant y revisa los tokens consumidos por ejecución.
-                      </p>
+                      
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs text-muted-foreground">
