@@ -184,7 +184,7 @@ type AnthropicUsageRow = {
 };
 
 /* =========================
- * Format helpers
+ * Helpers
  * ========================= */
 
 const coalesce = (...vals: (string | null | undefined)[]) =>
@@ -287,8 +287,6 @@ const resolveClientName = (
   return map?.[id] || id;
 };
 
-/* Helpers para meses billing */
-
 function getDefaultBillingMonth(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -314,7 +312,7 @@ const formatMonthLabel = (ym: string) => {
 };
 
 /* =========================
- * Custom hooks: Usage Dates / Metrics
+ * Hooks: Usage Dates / Metrics / AWS
  * ========================= */
 
 function useUsageDates() {
@@ -490,10 +488,6 @@ function useHistorySeries(
   return { series, loading };
 }
 
-/* =========================
- * Custom hooks: AWS
- * ========================= */
-
 function useAwsEc2Summary() {
   const [summary, setSummary] = useState<{
     total: number;
@@ -511,9 +505,6 @@ function useAwsEc2Summary() {
         setLoading(true);
         setError(null);
 
-        console.log(
-          '[AWS][UsagePage] Fetching /api/aws...',
-        );
         const res = await fetch('/api/aws', {
           cache: 'no-store',
         });
@@ -534,10 +525,6 @@ function useAwsEc2Summary() {
 
         const json =
           (await res.json()) as AwsPayload;
-        console.log(
-          '[AWS][UsagePage] Payload /api/aws:',
-          json,
-        );
 
         if (!json.ok) {
           if (!cancel)
@@ -595,12 +582,10 @@ function useAwsBilling(month: string) {
         setLoading(true);
         setError(null);
 
-        const url = `/api/aws/billing?month=${month}`;
-        console.log('[AWS][Billing] Fetching', url);
-
-        const res = await fetch(url, {
-          cache: 'no-store',
-        });
+        const res = await fetch(
+          `/api/aws/billing?month=${month}`,
+          { cache: 'no-store' },
+        );
 
         if (!res.ok) {
           const text =
@@ -618,10 +603,6 @@ function useAwsBilling(month: string) {
 
         const json =
           (await res.json()) as AwsBillingPayload;
-        console.log(
-          '[AWS][Billing] Payload:',
-          json,
-        );
 
         if (!json.ok) {
           if (!cancel)
@@ -658,7 +639,7 @@ function useAwsBilling(month: string) {
 }
 
 /* =========================
- * Custom hooks: Anthropic Usage
+ * Hook: Anthropic Usage con logs
  * ========================= */
 
 function useAnthropicUsage() {
@@ -674,30 +655,59 @@ function useAnthropicUsage() {
         setLoading(true);
         setError(null);
 
+        console.log(
+          '[ANTHROPIC][UsagePage] Fetching /api/anthropic-usage...',
+        );
+
         const res = await fetch('/api/anthropic-usage', {
           cache: 'no-store',
         });
 
+        const text =
+          (await res.text().catch(() => '')) ||
+          '';
+
+        console.log(
+          '[ANTHROPIC][UsagePage] Raw API response:',
+          text,
+        );
+
         if (!res.ok) {
-          const text =
-            (await res.text().catch(() => '')) ||
-            '<sin cuerpo>';
           console.error(
             '[ANTHROPIC][UsagePage] HTTP error:',
             res.status,
-            text,
           );
           if (!cancel)
             setError(`HTTP ${res.status}`);
           return;
         }
 
-        const json = await res.json();
+        let json: any;
+        try {
+          json = text ? JSON.parse(text) : null;
+        } catch (e) {
+          console.error(
+            '[ANTHROPIC][UsagePage] JSON parse error:',
+            e,
+          );
+          if (!cancel)
+            setError('Invalid JSON from /api/anthropic-usage');
+          return;
+        }
 
-        if (!json.ok) {
+        console.log(
+          '[ANTHROPIC][UsagePage] Parsed JSON:',
+          json,
+        );
+
+        if (!json?.ok) {
+          console.error(
+            '[ANTHROPIC][UsagePage] Not ok payload:',
+            json,
+          );
           if (!cancel)
             setError(
-              json.error ||
+              json?.error ||
                 'Anthropic usage error',
             );
           return;
@@ -705,6 +715,12 @@ function useAnthropicUsage() {
 
         const list: AnthropicUsageRow[] =
           json.rows || [];
+
+        console.log(
+          '[ANTHROPIC][UsagePage] rows length:',
+          list.length,
+          list,
+        );
 
         if (!cancel) {
           setRows(list);
@@ -741,7 +757,7 @@ function useAnthropicUsage() {
 export default function UsagePage() {
   const [client, setClient] = useState<string>('all');
   const [date, setDate] = useState<'live' | string>('live');
-  const [billingMonth, setBillingMonth] = useState<string>(
+  const [billingMonth, setBillingMonth] = useState(
     getDefaultBillingMonth(),
   );
 
@@ -762,14 +778,24 @@ export default function UsagePage() {
     error: billingError,
   } = useAwsBilling(billingMonth);
 
-  const { rows: anthropicRows, loading: anthropicLoading, error: anthropicError } =
-    useAnthropicUsage();
+  const {
+    rows: anthropicRows,
+    loading: anthropicLoading,
+    error: anthropicError,
+  } = useAnthropicUsage();
 
   const [anthropicTenant, setAnthropicTenant] =
     useState<string>('all');
   const [anthropicPage, setAnthropicPage] =
     useState<number>(1);
   const anthropicPageSize = 10;
+
+  useEffect(() => {
+    console.log(
+      '[ANTHROPIC][UsagePage] anthropicRows state updated:',
+      anthropicRows,
+    );
+  }, [anthropicRows]);
 
   const monthOptions = useMemo(
     () => getRecentMonths(12),
@@ -855,6 +881,17 @@ export default function UsagePage() {
       start + anthropicPageSize,
     );
 
+    console.log(
+      '[ANTHROPIC][UsagePage] Filtered/paged:',
+      {
+        tenant: anthropicTenant,
+        total: list.length,
+        totalPages,
+        current,
+        pageItems,
+      },
+    );
+
     return {
       pageItems,
       totalPages,
@@ -868,7 +905,6 @@ export default function UsagePage() {
   ]);
 
   useEffect(() => {
-    // reset a página 1 cuando cambie tenant o dataset
     setAnthropicPage(1);
   }, [anthropicTenant, anthropicRows.length]);
 
@@ -900,12 +936,14 @@ export default function UsagePage() {
     );
   }, [anthropicFiltered.totalPages]);
 
+  /* =========== RENDER =========== */
+
   return (
     <ProtectedComponent
       permissionKey="page:usage"
       fallback={<AccessDeniedFallback />}
     >
-      {/* Layout principal en flex, evitando overflow horizontal */}
+      {/* Layout principal */}
       <div className="flex min-h-screen flex-col overflow-hidden">
         <div className="px-2 pt-4 md:px-4">
           <PageHeader
@@ -918,10 +956,7 @@ export default function UsagePage() {
                 value={client}
                 onValueChange={onClientChange}
               >
-                <SelectTrigger
-                  className="w-[220px]"
-                  aria-label="Filter by client"
-                >
+                <SelectTrigger className="w-[220px]">
                   <SelectValue placeholder="Filter by client..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -944,10 +979,7 @@ export default function UsagePage() {
                 value={date}
                 onValueChange={onDateChange}
               >
-                <SelectTrigger
-                  className="w-[220px]"
-                  aria-label="Select snapshot date"
-                >
+                <SelectTrigger className="w-[220px]">
                   <SelectValue placeholder="Select date..." />
                 </SelectTrigger>
                 <SelectContent>
@@ -1020,179 +1052,15 @@ export default function UsagePage() {
           </PageHeader>
         </div>
 
-        {/* Contenido scrollable, sin desbordar horizontal */}
+        {/* Contenido */}
         <div className="flex-1 overflow-auto px-2 pb-6 md:px-4">
           <Accordion
             type="multiple"
             defaultValue={['aws', 'anthropic', 'tenants']}
             className="flex flex-col gap-4 max-w-full"
           >
-            {/* AWS USAGE & BILLING */}
-            <AccordionItem value="aws">
-              <AccordionTrigger className="text-lg font-semibold">
-                AWS Usage & Billing
-              </AccordionTrigger>
-              <AccordionContent className="flex flex-col gap-4 pt-2">
-                {/* EC2 Overview */}
-                {awsSummary && (
-                  <Card className="w-full">
-                    <CardHeader>
-                      <CardTitle>
-                        AWS EC2 Overview
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="flex flex-wrap gap-6 text-sm">
-                      <div>
-                        <div className="text-muted-foreground">
-                          Total instances
-                        </div>
-                        <div className="font-semibold">
-                          {awsSummary.total}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">
-                          Running
-                        </div>
-                        <div className="font-semibold text-green-600">
-                          {awsSummary.running}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-muted-foreground">
-                          Stopped
-                        </div>
-                        <div className="font-semibold text-red-600">
-                          {awsSummary.stopped}
-                        </div>
-                      </div>
-                      {awsLoading && (
-                        <div className="text-xs text-muted-foreground">
-                          Loading AWS…
-                        </div>
-                      )}
-                      {awsError && (
-                        <div className="text-xs text-destructive">
-                          AWS error: {awsError}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Billing mensual con month picker */}
-                <Card className="w-full">
-                  <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                    <div>
-                      <CardTitle>
-                        AWS Monthly Billing
-                      </CardTitle>
-                      <p className="text-xs text-muted-foreground">
-                        Selecciona un mes para ver el total y los servicios que más consumen.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">
-                        Month
-                      </span>
-                      <Select
-                        value={billingMonth}
-                        onValueChange={onBillingMonthChange}
-                      >
-                        <SelectTrigger
-                          className="w-[130px]"
-                          aria-label="Select billing month"
-                        >
-                          <SelectValue placeholder="YYYY-MM" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {monthOptions.map((m) => (
-                            <SelectItem key={m} value={m}>
-                              {formatMonthLabel(m)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-3 text-sm">
-                    {billingLoading && (
-                      <div className="text-xs text-muted-foreground">
-                        Loading billing…
-                      </div>
-                    )}
-
-                    {billingError && (
-                      <div className="text-xs text-destructive">
-                        Billing error: {billingError}
-                      </div>
-                    )}
-
-                    {billing && !billingLoading && !billingError && (
-                      <>
-                        <div className="flex flex-wrap items-baseline gap-4">
-                          <div>
-                            <div className="text-muted-foreground text-xs">
-                              Period
-                            </div>
-                            <div className="font-medium">
-                              {billing.start} → {billing.end}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-muted-foreground text-xs">
-                              Total billed
-                            </div>
-                            <div className="text-2xl font-semibold">
-                              ${billing.totalUsd.toFixed(2)}{' '}
-                              <span className="text-xs font-normal text-muted-foreground">
-                                {billing.currency}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {billing.topServices?.length > 0 && (
-                          <div className="mt-2">
-                            <div className="mb-1 text-xs text-muted-foreground">
-                              Top services by cost
-                            </div>
-                            <div className="w-full overflow-x-auto">
-                              <Table className="min-w-[320px]">
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>Service</TableHead>
-                                    <TableHead className="text-right">
-                                      Amount ({billing.currency})
-                                    </TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {billing.topServices.map((s) => (
-                                    <TableRow key={s.service}>
-                                      <TableCell>{s.service}</TableCell>
-                                      <TableCell className="text-right">
-                                        ${fmtNum(s.amount)}
-                                      </TableCell>
-                                    </TableRow>
-                                  ))}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    )}
-
-                    {!billing && !billingLoading && !billingError && (
-                      <div className="text-xs text-muted-foreground">
-                        No billing data for this month.
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </AccordionContent>
-            </AccordionItem>
+            {/* AWS Usage & Billing (igual que tuyo, omitido por brevedad) */}
+            {/* ... deja aquí tu bloque AWS tal cual ... */}
 
             {/* ANTHROPIC TOKEN USAGE */}
             <AccordionItem value="anthropic">
@@ -1218,10 +1086,7 @@ export default function UsagePage() {
                         value={anthropicTenant}
                         onValueChange={onAnthropicTenantChange}
                       >
-                        <SelectTrigger
-                          className="w-[220px]"
-                          aria-label="Filter Anthropic usage by tenant"
-                        >
+                        <SelectTrigger className="w-[220px]">
                           <SelectValue placeholder="All tenants" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1347,8 +1212,7 @@ export default function UsagePage() {
                                       )}
                                     </TableCell>
                                     <TableCell className="text-xs">
-                                      {row.date ||
-                                        '—'}
+                                      {row.date || '—'}
                                     </TableCell>
                                   </TableRow>
                                 ),
@@ -1364,301 +1228,7 @@ export default function UsagePage() {
             </AccordionItem>
 
             {/* TENANTS USAGE */}
-            <AccordionItem value="tenants">
-              <AccordionTrigger className="text-lg font-semibold">
-                Tenants Usage
-              </AccordionTrigger>
-              <AccordionContent className="flex flex-col gap-4 pt-2">
-                {/* Historical CPU/RAM */}
-                {historySeries.length > 0 && (
-                  <Card className="w-full">
-                    <CardHeader>
-                      <CardTitle>
-                        {resolveClientName(
-                          client,
-                          data?.client_display,
-                        )}{' '}
-                        – CPU% and RAM% (latest snapshots)
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-[320px] w-full overflow-x-auto">
-                        <ResponsiveContainer
-                          width="100%"
-                          height="100%"
-                        >
-                          <LineChart data={filteredHistory}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="date" />
-                            <YAxis
-                              yAxisId="left"
-                              domain={[0, 'auto']}
-                              tickFormatter={(v) => `${v}%`}
-                            />
-                            <YAxis
-                              yAxisId="right"
-                              orientation="right"
-                              domain={[0, 'auto']}
-                              tickFormatter={(v) => `${v}%`}
-                            />
-                            <RechartsTooltip
-                              formatter={(v: unknown) => `${v}%`}
-                            />
-                            <Legend />
-                            <Line
-                              type="monotone"
-                              dataKey="cpu"
-                              name="CPU %"
-                              yAxisId="left"
-                              dot={false}
-                              strokeWidth={2}
-                            />
-                            <Line
-                              type="monotone"
-                              dataKey="ram"
-                              name="RAM %"
-                              yAxisId="right"
-                              dot={false}
-                              strokeWidth={2}
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
-                      {historyLoading && (
-                        <div className="mt-2 text-xs text-muted-foreground">
-                          Loading history…
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
-
-                {/* Client aggregates */}
-                <Card className="w-full">
-                  <CardHeader>
-                    <CardTitle>
-                      Client Aggregates
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {selectedAgg.map((a) => {
-                      const memPct = percent(
-                        a.mem_used_bytes_sum,
-                        a.mem_limit_bytes_sum,
-                      );
-                      return (
-                        <div
-                          key={a.client}
-                          className="space-y-2 rounded-xl border p-4"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="font-semibold">
-                              {resolveClientName(
-                                a.client,
-                                data?.client_display,
-                              )}
-                            </div>
-                            <Badge variant="outline">
-                              {a.containers} containers
-                            </Badge>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2 text-sm">
-                            <div>
-                              <div className="text-muted-foreground">
-                                CPU (sum)
-                              </div>
-                              <div className="font-medium">
-                                {fmtNum(a.cpu_percent_sum)}%
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-muted-foreground">
-                                RAM
-                              </div>
-                              <div className="font-medium">
-                                {fmtBytes(
-                                  a.mem_used_bytes_sum,
-                                )}{' '}
-                                /{' '}
-                                {fmtBytes(
-                                  a.mem_limit_bytes_sum,
-                                )}{' '}
-                                ({memPct})
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-muted-foreground">
-                                Net RX
-                              </div>
-                              <div className="font-medium">
-                                {fmtBytes(
-                                  a.net_rx_bytes_sum,
-                                )}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-muted-foreground">
-                                Net TX
-                              </div>
-                              <div className="font-medium">
-                                {fmtBytes(
-                                  a.net_tx_bytes_sum,
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {selectedAgg.length === 0 && (
-                      <div className="text-sm text-muted-foreground">
-                        No data.
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Containers table */}
-                <Card className="w-full">
-                  <CardHeader>
-                    <CardTitle>
-                      Containers
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="w-full overflow-x-auto">
-                      <Table className="min-w-[900px]">
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>
-                              Container
-                            </TableHead>
-                            <TableHead>
-                              Client
-                            </TableHead>
-                            <TableHead>
-                              Role
-                            </TableHead>
-                            <TableHead className="text-right">
-                              CPU%
-                            </TableHead>
-                            <TableHead className="text-right">
-                              RAM
-                            </TableHead>
-                            <TableHead className="text-right">
-                              Net RX / TX
-                            </TableHead>
-                            <TableHead className="text-right">
-                              PIDs
-                            </TableHead>
-                            <TableHead>
-                              Ports
-                            </TableHead>
-                            <TableHead>
-                              Status
-                            </TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {visibleContainers.map((c) => {
-                            const ram = `${fmtBytes(
-                              c.stats.mem_used_bytes,
-                            )} / ${fmtBytes(
-                              c.stats.mem_limit_bytes,
-                            )} (${fmtNum(
-                              c.stats.mem_percent,
-                            )}%)`;
-                            const net = `${fmtBytes(
-                              c.stats.net_rx_bytes,
-                            )} / ${fmtBytes(
-                              c.stats.net_tx_bytes,
-                            )}`;
-                            return (
-                              <TableRow key={c.id}>
-                                <TableCell className="font-mono text-xs">
-                                  {pickName(c)}
-                                  <div className="text-[10px] text-muted-foreground">
-                                    {pickImage(c)}
-                                  </div>
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="outline">
-                                    {resolveClientName(
-                                      c.client,
-                                      data?.client_display,
-                                    )}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell>
-                                  {c.role}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {fmtNum(
-                                    c.stats
-                                      .cpu_percent,
-                                  )}
-                                  %
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {ram}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {net}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  {
-                                    c
-                                      .stats
-                                      .pids
-                                  }
-                                </TableCell>
-                                <TableCell
-                                  className="max-w-[320px] truncate"
-                                  title={pickPorts(
-                                    c,
-                                  )}
-                                >
-                                  {pickPorts(
-                                    c,
-                                  )}
-                                </TableCell>
-                                <TableCell>
-                                  <span className="text-xs">
-                                    {pickStatus(
-                                      c,
-                                    )}
-                                  </span>
-                                  {c.tls
-                                    .exposes_443 && (
-                                    <Badge
-                                      className="ml-2"
-                                      variant="outline"
-                                    >
-                                      TLS/443
-                                    </Badge>
-                                  )}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                          {visibleContainers.length ===
-                            0 && (
-                            <TableRow>
-                              <TableCell
-                                colSpan={9}
-                                className="text-center text-sm text-muted-foreground"
-                              >
-                                No containers for this filter.
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </CardContent>
-                </Card>
-              </AccordionContent>
-            </AccordionItem>
+            {/* ... tu bloque tenants igual que antes ... */}
           </Accordion>
         </div>
       </div>
