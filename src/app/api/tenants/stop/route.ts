@@ -9,8 +9,6 @@ const exec = promisify(execFile);
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const INTERNAL_TOKEN = process.env.INTERNAL_N8N_TOKEN;
-
 // Convención: cómo se llaman los contenedores por tenant
 function containersForTenant(tenantId: string) {
   return [
@@ -20,20 +18,7 @@ function containersForTenant(tenantId: string) {
 }
 
 export async function POST(req: NextRequest) {
-  // 1) Auth (opcional pero recomendado)
-  if (INTERNAL_TOKEN) {
-    const token = req.headers.get('x-internal-token');
-    if (token !== INTERNAL_TOKEN) {
-      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
-    }
-  } else {
-    // ⚠️ Sin token → esto queda expuesto. Déjalo solo si estás en red privada / detrás de firewall.
-    console.warn(
-      '[admin/tenants/stop] INTERNAL_N8N_TOKEN is not set. Endpoint is unprotected!',
-    );
-  }
-
-  // 2) Input
+  // 1) Leer body
   let body: any;
   try {
     body = await req.json();
@@ -47,9 +32,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid tenantId' }, { status: 400 });
   }
 
-  // 3) Validar que el tenant exista según tus .env.*
+  // 2) Validar que el tenant exista según tus .env.*
   try {
-    const tenants = await loadTenants(); // ya lee .env.* y arma ids
+    const tenants = await loadTenants();
     const exists = tenants.some((t) => t.id === tenantId);
     if (!exists) {
       return NextResponse.json(
@@ -58,7 +43,6 @@ export async function POST(req: NextRequest) {
       );
     }
   } catch (e: any) {
-    // si falla loadTenants, mejor no matar nada
     return NextResponse.json(
       { error: 'failed to verify tenant', detail: e?.message || String(e) },
       { status: 500 },
@@ -67,8 +51,8 @@ export async function POST(req: NextRequest) {
 
   const containers = containersForTenant(tenantId);
 
+  // 3) Ejecutar docker stop
   try {
-    // 4) Ejecutar docker stop
     const { stdout, stderr } = await exec('docker', ['stop', ...containers]);
 
     return NextResponse.json({
