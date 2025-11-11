@@ -1,23 +1,22 @@
-// src/app/api/tenants/deploy/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { loadTenants } from '@/lib/tenants';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// poné aquí la URL real del webhook de n8n que levanta el tenant
-const N8N_DEPLOY_WEBHOOK =
-  process.env.N8N_DEPLOY_WEBHOOK ||
-  'https://n8n.uqminds.org/webhook/deploy-tenant'; // ajustá este path
+const exec = promisify(execFile);
+
+// Convención local: nombres de contenedores por tenant
+function containersForTenant(tenantId: string) {
+  return [
+    `vivace-app-${tenantId}`,
+    `vivace-webserver-${tenantId}`,
+  ];
+}
 
 export async function POST(req: NextRequest) {
-  if (!N8N_DEPLOY_WEBHOOK) {
-    return NextResponse.json(
-      { ok: false, error: 'Missing N8N_DEPLOY_WEBHOOK' },
-      { status: 500 },
-    );
-  }
-
   let body: any;
   try {
     body = await req.json();
@@ -30,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: 'invalid tenantId' }, { status: 400 });
   }
 
-  // validar que exista ese tenant según tus .env.*
+  // 1) Validar tenant contra .env.*
   try {
     const tenants = await loadTenants();
     const exists = tenants.some((t) => t.id === tenantId);
@@ -47,33 +46,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // forward al webhook de n8n
-  try {
-    const resp = await fetch(N8N_DEPLOY_WEBHOOK, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ tenantId }),
-    });
+  const containers = containersForTenant(tenantId);
 
-    const text = await resp.text();
+  try {
+    // 2) Intentar levantar contenedores existentes (detenidos)
+    // Si alguno no existe o falla, docker devolverá código != 0
+    const { stdout, stderr } = await exec('docker', ['start', ...containers]);
 
     return NextResponse.json(
       {
-        ok: resp.ok,
-        status: resp.status,
+        ok: true,
         tenantId,
-        n8nResponse: text,
+        containers,
+        stdout,
+        stderr,
       },
-      { status: resp.ok ? 200 : 500 },
+      { status: 200 },
     );
   } catch (e: any) {
+    // Aquí podrías agregar lógica extra:
+    // - intentar `docker compose -f ... up -d`
+    // - o devolver info más detallada
     return NextResponse.json(
       {
         ok: false,
         tenantId,
-        error: e?.message || 'failed to call n8n webhook',
+        containers,
+        error: e?.message || 'docker start failed',
+        code: e?.code,
+        stderr: e?.stderr,
+        stdout: e?.stdout,
       },
       { status: 500 },
     );
