@@ -257,40 +257,66 @@ export default function HomePageClient({
             const status = (t.management?.status as ManagementStatus) || '';
             const sinceDate = parseLocalDateFromYMD(t.management?.date || null);
             const renewalDate = addOneMonth(sinceDate);
+            const now = Date.now();
 
-            const isExpired = status === 'TRIAL' && renewalDate && Date.now() >= renewalDate.getTime();
+            // La FECHA manda: si hay renewalDate y ya pasó -> expirado SIEMPRE
+            const isExpired = !!renewalDate && now >= renewalDate.getTime();
 
             let ctaLabel = '';
-            let ctaNextStatus: ManagementStatus = undefined;
+            let ctaNextStatus: ManagementStatus | undefined;
 
-            if (!status) {
+            // 1) Nunca se ha configurado nada -> cliente nuevo
+            if (!sinceDate) {
               ctaLabel = 'Start Trial';
               ctaNextStatus = 'TRIAL';
-            } else if (status === 'TRIAL' && isExpired) {
-              ctaLabel = 'Activate Subscription';
-              ctaNextStatus = 'SUBSCRIBED';
-            } else if (status === 'SUBSCRIBED') {
-              ctaLabel = 'Renew';
-              ctaNextStatus = 'SUBSCRIBED';
+            }
+            // 2) Expirado: da igual si antes era TRIAL o SUBSCRIBED
+            else if (isExpired) {
+              if (status === 'SUBSCRIBED') {
+                // Suscripción vencida
+                ctaLabel = 'Renew';
+                ctaNextStatus = 'SUBSCRIBED';
+              } else {
+                // Trial vencido o sin status claro
+                ctaLabel = 'Activate Subscription';
+                ctaNextStatus = 'SUBSCRIBED';
+              }
+            }
+            // 3) Activo (no expirado todavía)
+            else {
+              if (status === 'SUBSCRIBED') {
+                // Suscripción al día: permitimos renovar anticipado si quieres
+                ctaLabel = 'Renew';
+                ctaNextStatus = 'SUBSCRIBED';
+              } else {
+                // Dentro de ventana de trial
+                ctaLabel = 'Activate Subscription';
+                ctaNextStatus = 'SUBSCRIBED';
+              }
             }
 
+            // Colores del card basados en fecha
             const cardTone =
-              !status
-                ? 'bg-yellow-50 border-yellow-200 text-yellow-700'
+              !sinceDate
+                ? 'bg-yellow-50 border-yellow-200 text-yellow-700' // nuevo
                 : isExpired
-                  ? 'bg-red-50 border-red-200 text-red-700'
-                  : status === 'TRIAL'
-                    ? 'bg-blue-50 border-blue-200 text-blue-700'
-                    : 'bg-green-50 border-green-200 text-green-700';
+                  ? 'bg-red-50 border-red-200 text-red-700' // vencido (trial o sub)
+                  : status === 'SUBSCRIBED'
+                    ? 'bg-green-50 border-green-200 text-green-700' // sub activa
+                    : 'bg-blue-50 border-blue-200 text-blue-700'; // trial activo
 
+            // Texto de estado
             const statusText =
-              !status
+              !sinceDate
                 ? '🆕 NEW CLIENT'
-                : isExpired
-                  ? '⚠️ TRIAL EXPIRED'
-                  : status === 'TRIAL'
-                    ? `⏳ TRIAL (until ${formatLocal(renewalDate) ?? 'N/A'})`
-                    : `✅ SUBSCRIBED (renew by ${formatLocal(renewalDate) ?? 'N/A'})`;
+                : isExpired && status === 'SUBSCRIBED'
+                  ? '⚠️ SUBSCRIPTION EXPIRED (renew now)'
+                  : isExpired
+                    ? '⚠️ TRIAL EXPIRED'
+                    : status === 'SUBSCRIBED'
+                      ? `✅ SUBSCRIBED (renew by ${formatLocal(renewalDate) ?? 'N/A'})`
+                      : `⏳ TRIAL (until ${formatLocal(renewalDate) ?? 'N/A'})`;
+
 
             const docker = statuses[t.tenantId];
             const isRunning = docker?.overall === 'up';
