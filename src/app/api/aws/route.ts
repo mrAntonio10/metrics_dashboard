@@ -1,13 +1,12 @@
+// src/app/api/aws/route.ts
 import { NextResponse } from 'next/server';
 import AWS from 'aws-sdk';
+
+export const runtime = 'nodejs'; // asegura Node.js, no edge
 
 const region = process.env.AWS_REGION || 'us-east-1';
 const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-
-if (!accessKeyId || !secretAccessKey) {
-  console.warn('[AWS] Faltan AWS_ACCESS_KEY_ID o AWS_SECRET_ACCESS_KEY en variables de entorno');
-}
 
 AWS.config.update({
   region,
@@ -17,6 +16,17 @@ AWS.config.update({
 
 export async function GET() {
   try {
+    if (!accessKeyId || !secretAccessKey) {
+      console.error('[AWS][EC2] Missing AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY in env');
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Missing AWS credentials in environment (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)',
+        },
+        { status: 500 },
+      );
+    }
+
     const ec2 = new AWS.EC2();
 
     const data = await ec2.describeInstances().promise();
@@ -42,12 +52,11 @@ export async function GET() {
     });
   } catch (error) {
     const err = error as Error;
-    console.error('[AWS][EC2] Error consultando AWS:', err.message);
-
+    console.error('[AWS][EC2] Error consultando AWS:', err.message, err.stack);
     return NextResponse.json(
       {
         ok: false,
-        error: 'Error consultando AWS EC2. Revisa credenciales / permisos.',
+        error: err.message || 'Unknown AWS error',
       },
       { status: 500 },
     );
