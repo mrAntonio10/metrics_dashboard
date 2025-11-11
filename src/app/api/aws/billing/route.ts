@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import AWS from 'aws-sdk';
 
-export const runtime = 'nodejs'; // aseguramos Node.js
+export const runtime = 'nodejs';
 
 const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
@@ -43,10 +43,35 @@ type BillingErrorPayload = {
 const formatDate = (d: Date): string => d.toISOString().slice(0, 10);
 
 /**
- * Rango: últimos 30 días (End exclusivo, como requiere Cost Explorer).
- * Ej: si hoy es 2025-11-10 -> Start=2025-10-11, End=2025-11-10
+ * Rango mensual [Start, End) para un YYYY-MM
  */
-const getLast30DaysRange = () => {
+function getMonthRange(ym: string) {
+  const [yearStr, monthStr] = ym.split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    month < 1 ||
+    month > 12
+  ) {
+    throw new Error('Invalid month format. Expected YYYY-MM');
+  }
+
+  const start = new Date(Date.UTC(year, month - 1, 1));
+  const end = new Date(Date.UTC(year, month, 1)); // exclusivo para CE
+
+  return {
+    Start: formatDate(start),
+    End: formatDate(end),
+  };
+}
+
+/**
+ * Fallback: últimos 30 días [Start, End)
+ */
+function getLast30DaysRange() {
   const end = new Date();
   end.setUTCHours(0, 0, 0, 0);
 
@@ -57,9 +82,9 @@ const getLast30DaysRange = () => {
     Start: formatDate(start),
     End: formatDate(end),
   };
-};
+}
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     if (!accessKeyId || !secretAccessKey) {
       return NextResponse.json<BillingErrorPayload>(
@@ -74,12 +99,32 @@ export async function GET() {
 
     const ce = new AWS.CostExplorer({ region: 'us-east-1' });
 
-    const { Start, End } = getLast30DaysRange();
+    const url = new URL(req.url);
+    const month = url.searchParams.get('month'); // esperado: YYYY-MM
+
+    let range: { Start: string; End: string };
+
+    if (month) {
+      try {
+        range = getMonthRange(month);
+      } catch (e) {
+        // Si viene mal formado, devolvemos 400 y msg claro
+        return NextResponse.json<BillingErrorPayload>(
+          {
+            ok: false,
+            error: (e as Error).message,
+          },
+          { status: 400 },
+        );
+      }
+    } else {
+      range = getLast30DaysRange();
+    }
 
     const params: AWS.CostExplorer.GetCostAndUsageRequest = {
       TimePeriod: {
-        Start,
-        End,
+        Start: range.Start,
+        End: range.End,
       },
       Granularity: 'MONTHLY',
       Metrics: ['UnblendedCost'],
@@ -110,8 +155,8 @@ export async function GET() {
 
     const payload: BillingOkPayload = {
       ok: true,
-      start: Start,
-      end: End,
+      start: range.Start,
+      end: range.End,
       totalUsd: Number(totalUsd.toFixed(2)),
       currency,
       topServices: services.slice(0, 10),
@@ -121,12 +166,17 @@ export async function GET() {
     return NextResponse.json(payload);
   } catch (error) {
     const err = error as Error;
-    console.error('[AWS][Billing] Error consultando Cost Explorer:', err.message, err.stack);
+    console.error(
+      '[AWS][Billing] Error consultando Cost Explorer:',
+      err.message,
+      err.stack,
+    );
 
     return NextResponse.json<BillingErrorPayload>(
       {
         ok: false,
-        error: err.message || 'Error consultando AWS Cost Explorer',
+        error:
+          err.message || 'Error consultando AWS Cost Explorer',
       },
       { status: 500 },
     );
