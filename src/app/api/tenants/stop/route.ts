@@ -1,4 +1,4 @@
-// src/app/api/admin/tenants/stop/route.ts
+// src/app/api/tenants/stop/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';

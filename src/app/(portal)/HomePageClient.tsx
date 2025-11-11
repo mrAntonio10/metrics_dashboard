@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useTransition } from 'react';
+import { useMemo, useTransition, useEffect, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
@@ -26,10 +26,23 @@ export type CountRow = {
 
 type ManagementStatus = 'TRIAL' | 'SUBSCRIBED' | '' | undefined;
 
+/** Docker status types (respuesta esperada de /api/tenants/status) */
+type TenantStatusOverall = 'up' | 'down' | 'missing';
+type TenantContainerStatus = {
+  name: string;
+  rawStatus: string;
+  isUp: boolean;
+};
+type TenantStatus = {
+  tenantId: string;
+  tenantName: string;
+  overall: TenantStatusOverall;
+  containers: TenantContainerStatus[];
+};
+
 /** Utilities */
 function parseLocalDateFromYMD(ymd?: string | null): Date | null {
   if (!ymd) return null;
-  // Force local interpretation to avoid TZ drift.
   const d = new Date(`${ymd}T00:00:00`);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -64,6 +77,10 @@ export default function HomePageClient({
   const search = useSearchParams();
   const [isPending, startTransition] = useTransition();
 
+  /** Estado docker por tenant */
+  const [statuses, setStatuses] = useState<Record<string, TenantStatus>>({});
+  const [deploying, setDeploying] = useState<string | null>(null);
+
   const handleSelectClient = (val: string) => {
     startTransition(() => {
       const params = new URLSearchParams(search.toString());
@@ -93,6 +110,41 @@ export default function HomePageClient({
 
   const errored = filtered.filter((r) => r.error);
 
+  /** Cargar estado docker una vez al montar */
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch('/api/tenants/status', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const map: Record<string, TenantStatus> = {};
+        for (const item of data.items || []) {
+          map[item.tenantId] = item as TenantStatus;
+        }
+        setStatuses(map);
+      } catch (e) {
+        console.error('Failed to load tenant statuses', e);
+      }
+    };
+    load();
+  }, []);
+
+  const refreshStatuses = async () => {
+    try {
+      const res = await fetch('/api/tenants/status', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const map: Record<string, TenantStatus> = {};
+      for (const item of data.items || []) {
+        map[item.tenantId] = item as TenantStatus;
+      }
+      setStatuses(map);
+    } catch (e) {
+      console.error('Failed to refresh tenant statuses', e);
+    }
+  };
+
+  /** Cambiar status de trial/subscription (ya lo tenías) */
   async function handleStatusChange(tenantId: string, newStatus: ManagementStatus) {
     await fetch('/api/tenants/update', {
       method: 'POST',
@@ -101,6 +153,25 @@ export default function HomePageClient({
     });
     startTransition(() => router.refresh());
   }
+
+  /** Disparar deploy via n8n (API interna) */
+  const handleDeployTenant = async (tenantId: string) => {
+    try {
+      setDeploying(tenantId);
+      const res = await fetch('/api/tenants/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenantId }),
+      });
+      const json = await res.json().catch(() => ({}));
+      console.log('Deploy response', json);
+      await refreshStatuses();
+    } catch (e) {
+      console.error('Failed to trigger deploy', e);
+    } finally {
+      setDeploying(null);
+    }
+  };
 
   return (
     <ProtectedComponent permissionKey="page:home" fallback={<AccessDeniedFallback />}>
@@ -221,6 +292,25 @@ export default function HomePageClient({
                     ? `⏳ TRIAL (until ${formatLocal(renewalDate) ?? 'N/A'})`
                     : `✅ SUBSCRIBED (renew by ${formatLocal(renewalDate) ?? 'N/A'})`;
 
+            const docker = statuses[t.tenantId];
+            const isRunning = docker?.overall === 'up';
+
+            let dockerLabel = 'Unknown';
+            let dockerClass = 'bg-slate-100 text-slate-600';
+
+            if (docker) {
+              if (docker.overall === 'up') {
+                dockerLabel = 'Running';
+                dockerClass = 'bg-emerald-50 text-emerald-700';
+              } else if (docker.overall === 'down') {
+                dockerLabel = 'Stopped / Partial';
+                dockerClass = 'bg-rose-50 text-rose-700';
+              } else {
+                dockerLabel = 'Not deployed';
+                dockerClass = 'bg-slate-100 text-slate-600';
+              }
+            }
+
             return (
               <Card key={t.tenantId} className={cardTone}>
                 <CardHeader>
@@ -237,12 +327,31 @@ export default function HomePageClient({
                 <CardContent className="flex flex-col gap-2">
                   <div className="text-sm font-semibold">{statusText}</div>
                   {sinceDate && (
-                    <div className="text-xs text-muted-foreground">Since: {formatLocal(sinceDate)}</div>
+                    <div className="text-xs text-muted-foreground">
+                      Since: {formatLocal(sinceDate)}
+                    </div>
                   )}
+
+                  {/* Docker status + Deploy */}
+                  <div className="mt-1 flex items-center gap-2 text-xs">
+                    <span className={`px-2 py-0.5 rounded-full ${dockerClass}`}>
+                      Docker: {dockerLabel}
+                    </span>
+                    {!isRunning && (
+                      <button
+                        onClick={() => handleDeployTenant(t.tenantId)}
+                        disabled={deploying === t.tenantId}
+                        className="px-2.5 py-1 rounded-md bg-blue-600 text-white text-[10px] hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {deploying === t.tenantId ? 'Deploying…' : 'Deploy Tenant'}
+                      </button>
+                    )}
+                  </div>
+
                   {ctaLabel && ctaNextStatus && (
                     <button
                       onClick={() => handleStatusChange(t.tenantId, ctaNextStatus)}
-                      className="text-sm px-3 py-1 rounded-md bg-primary text-white w-fit hover:opacity-90"
+                      className="mt-2 text-sm px-3 py-1 rounded-md bg-primary text-white w-fit hover:opacity-90"
                     >
                       {ctaLabel}
                     </button>
