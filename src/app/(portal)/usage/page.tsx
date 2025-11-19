@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
   useCallback,
+  useRef,
 } from 'react';
 
 import { PageHeader } from '@/components/page-header';
@@ -29,6 +30,7 @@ import {
   SelectItem,
   SelectValue,
 } from '@/components/ui/select';
+
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -447,8 +449,8 @@ function useHistorySeries(
               client === 'all'
                 ? payload.client_agg
                 : payload.client_agg.filter(
-                  (a) => a.client === client,
-                );
+                    (a) => a.client === client,
+                  );
             const cpu = aggs.reduce(
               (acc, a) =>
                 acc + (a.cpu_percent_sum || 0),
@@ -545,7 +547,7 @@ function useAwsEc2Summary() {
           if (!cancel)
             setError(
               json.error ||
-              'Unknown AWS error',
+                'Unknown AWS error',
             );
           return;
         }
@@ -629,7 +631,7 @@ function useAwsBilling(month: string) {
           if (!cancel)
             setError(
               json.error ||
-              'Unknown billing error',
+                'Unknown billing error',
             );
           return;
         }
@@ -728,7 +730,7 @@ function useAnthropicUsage() {
           if (!cancel)
             setError(
               json?.error ||
-              'Anthropic usage error',
+                'Anthropic usage error',
             );
           return;
         }
@@ -770,7 +772,6 @@ function useAnthropicUsage() {
   return { rows, loading, error };
 }
 
-
 /* =========================
  * Component
  * ========================= */
@@ -784,6 +785,22 @@ export default function UsagePage() {
 
   const [clientSearch, setClientSearch] =
     useState<string>('');
+  const [clientDropdownOpen, setClientDropdownOpen] =
+    useState<boolean>(false);
+  const clientBoxRef = useRef<HTMLDivElement | null>(null);
+
+  const [anthropicTenant, setAnthropicTenant] =
+    useState<string>('all');
+  const [anthropicPage, setAnthropicPage] =
+    useState<number>(1);
+  const anthropicPageSize = 10;
+
+  const [anthropicTenantSearch, setAnthropicTenantSearch] =
+    useState<string>('');
+  const [anthropicDropdownOpen, setAnthropicDropdownOpen] =
+    useState<boolean>(false);
+  const anthropicBoxRef =
+    useRef<HTMLDivElement | null>(null);
 
   const availableDates = useUsageDates();
   const { data, loading, error } = useMetrics(date);
@@ -802,17 +819,42 @@ export default function UsagePage() {
     error: billingError,
   } = useAwsBilling(billingMonth);
 
-  const { rows: anthropicRows, loading: anthropicLoading, error: anthropicError } =
-    useAnthropicUsage();
+  const {
+    rows: anthropicRows,
+    loading: anthropicLoading,
+    error: anthropicError,
+  } = useAnthropicUsage();
 
-  const [anthropicTenant, setAnthropicTenant] =
-    useState<string>('all');
-  const [anthropicPage, setAnthropicPage] =
-    useState<number>(1);
-  const anthropicPageSize = 10;
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
 
-  const [anthropicTenantSearch, setAnthropicTenantSearch] =
-    useState<string>('');
+      if (
+        clientBoxRef.current &&
+        !clientBoxRef.current.contains(target)
+      ) {
+        setClientDropdownOpen(false);
+      }
+
+      if (
+        anthropicBoxRef.current &&
+        !anthropicBoxRef.current.contains(target)
+      ) {
+        setAnthropicDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener(
+      'mousedown',
+      handleClickOutside,
+    );
+    return () => {
+      document.removeEventListener(
+        'mousedown',
+        handleClickOutside,
+      );
+    };
+  }, []);
 
   const monthOptions = useMemo(
     () => getRecentMonths(12),
@@ -889,7 +931,10 @@ export default function UsagePage() {
         .toLowerCase()
         .includes(q),
     );
-  }, [anthropicTenants, anthropicTenantSearch]);
+  }, [
+    anthropicTenants,
+    anthropicTenantSearch,
+  ]);
 
   const anthropicFiltered = useMemo(() => {
     const list = (anthropicRows || [])
@@ -1006,57 +1051,75 @@ export default function UsagePage() {
             description="Per-client Docker metrics, AWS usage, monthly billing, and Anthropic token usage."
           >
             <div className="flex flex-wrap items-center gap-2">
-              {/* Client filter - ahora INPUT SEARCH */}
-              <div className="relative w-[220px]">
+              {/* Client filter - INPUT SEARCH + dropdown controlado */}
+              <div
+                ref={clientBoxRef}
+                className="relative w-[220px]"
+              >
                 <Input
                   placeholder="Filter by client..."
                   aria-label="Filter by client"
                   value={clientSearch}
+                  onFocus={() =>
+                    setClientDropdownOpen(true)
+                  }
                   onChange={(e) => {
                     const v = e.target.value;
                     setClientSearch(v);
+                    setClientDropdownOpen(true);
                     if (!v) {
                       onClientChange('all');
                     }
                   }}
                 />
-                {filteredClients.length > 0 && (
-                  <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
-                    <button
-                      type="button"
-                      className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
-                      onClick={() => {
-                        setClientSearch('');
-                        onClientChange('all');
-                      }}
-                    >
-                      All Clients
-                    </button>
-                    {filteredClients
-                      .filter((id) => id !== 'all')
-                      .map((id) => (
-                        <button
-                          key={id}
-                          type="button"
-                          className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
-                          onClick={() => {
-                            setClientSearch(
-                              resolveClientName(
-                                id,
-                                data?.client_display,
-                              ),
-                            );
-                            onClientChange(id);
-                          }}
-                        >
-                          {resolveClientName(
-                            id,
-                            data?.client_display,
-                          )}
-                        </button>
-                      ))}
-                  </div>
-                )}
+                {clientDropdownOpen &&
+                  filteredClients.length > 0 && (
+                    <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+                      <button
+                        type="button"
+                        className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                        onMouseDown={(e) =>
+                          e.preventDefault()
+                        }
+                        onClick={() => {
+                          setClientSearch('');
+                          onClientChange('all');
+                          setClientDropdownOpen(false);
+                        }}
+                      >
+                        All Clients
+                      </button>
+                      {filteredClients
+                        .filter((id) => id !== 'all')
+                        .map((id) => (
+                          <button
+                            key={id}
+                            type="button"
+                            className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                            onMouseDown={(e) =>
+                              e.preventDefault()
+                            }
+                            onClick={() => {
+                              setClientSearch(
+                                resolveClientName(
+                                  id,
+                                  data?.client_display,
+                                ),
+                              );
+                              onClientChange(id);
+                              setClientDropdownOpen(
+                                false,
+                              );
+                            }}
+                          >
+                            {resolveClientName(
+                              id,
+                              data?.client_display,
+                            )}
+                          </button>
+                        ))}
+                    </div>
+                  )}
               </div>
 
               {/* Date selector (Select normal) */}
@@ -1119,7 +1182,7 @@ export default function UsagePage() {
                   Updated:{' '}
                   {
                     availableDates[
-                    availableDates.length - 1
+                      availableDates.length - 1
                     ]
                   }
                 </span>
@@ -1331,48 +1394,68 @@ export default function UsagePage() {
                       <span className="text-xs text-muted-foreground">
                         Tenant
                       </span>
-                      <div className="relative w-[220px]">
+                      <div
+                        ref={anthropicBoxRef}
+                        className="relative w-[220px]"
+                      >
                         <Input
                           placeholder="All tenants"
                           aria-label="Filter Anthropic usage by tenant"
                           value={anthropicTenantSearch}
+                          onFocus={() =>
+                            setAnthropicDropdownOpen(true)
+                          }
                           onChange={(e) => {
                             const v = e.target.value;
                             setAnthropicTenantSearch(v);
+                            setAnthropicDropdownOpen(true);
                             if (!v) {
                               onAnthropicTenantChange('all');
                             }
                           }}
                         />
-                        {filteredAnthropicTenants.length > 0 && (
-                          <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
-                            <button
-                              type="button"
-                              className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
-                              onClick={() => {
-                                setAnthropicTenantSearch('');
-                                onAnthropicTenantChange('all');
-                              }}
-                            >
-                              All tenants
-                            </button>
-                            {filteredAnthropicTenants
-                              .filter((t) => t !== 'all')
-                              .map((t) => (
-                                <button
-                                  key={t}
-                                  type="button"
-                                  className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
-                                  onClick={() => {
-                                    setAnthropicTenantSearch(t);
-                                    onAnthropicTenantChange(t);
-                                  }}
-                                >
-                                  {t}
-                                </button>
-                              ))}
-                          </div>
-                        )}
+                        {anthropicDropdownOpen &&
+                          filteredAnthropicTenants.length > 0 && (
+                            <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+                              <button
+                                type="button"
+                                className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                                onMouseDown={(e) =>
+                                  e.preventDefault()
+                                }
+                                onClick={() => {
+                                  setAnthropicTenantSearch('');
+                                  onAnthropicTenantChange('all');
+                                  setAnthropicDropdownOpen(
+                                    false,
+                                  );
+                                }}
+                              >
+                                All tenants
+                              </button>
+                              {filteredAnthropicTenants
+                                .filter((t) => t !== 'all')
+                                .map((t) => (
+                                  <button
+                                    key={t}
+                                    type="button"
+                                    className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                                    onMouseDown={(e) =>
+                                      e.preventDefault()
+                                    }
+                                    onClick={() => {
+                                      setAnthropicTenantSearch(t);
+                                      onAnthropicTenantChange(t);
+                                      setAnthropicDropdownOpen(
+                                        false,
+                                      );
+                                    }}
+                                  >
+                                    {t}
+                                  </button>
+                                ))}
+                            </div>
+                          )}
                       </div>
                     </div>
                   </CardHeader>
@@ -1782,15 +1865,15 @@ export default function UsagePage() {
                           })}
                           {visibleContainers.length ===
                             0 && (
-                              <TableRow>
-                                <TableCell
-                                  colSpan={9}
-                                  className="text-center text-sm text-muted-foreground"
-                                >
-                                  No containers for this filter.
-                                </TableCell>
-                              </TableRow>
-                            )}
+                            <TableRow>
+                              <TableCell
+                                colSpan={9}
+                                className="text-center text-sm text-muted-foreground"
+                              >
+                                No containers for this filter.
+                              </TableCell>
+                            </TableRow>
+                          )}
                         </TableBody>
                       </Table>
                     </div>

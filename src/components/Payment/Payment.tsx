@@ -1,6 +1,11 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import {
   Elements,
   CardElement,
@@ -123,7 +128,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             amount: normalized,
             customerEmail: paymentData.customerEmail,
             customerName: paymentData.customerName,
-            description: paymentData.description || 'Subscription payment',
+            description:
+              paymentData.description || 'Subscription payment',
           }),
         });
 
@@ -172,9 +178,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
       return;
     }
 
-    const { error, paymentIntent } = await stripe.confirmCardPayment(
-      clientSecret,
-      {
+    const { error, paymentIntent } =
+      await stripe.confirmCardPayment(clientSecret, {
         payment_method: {
           card: cardElement,
           billing_details: {
@@ -182,8 +187,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
             email: paymentData.customerEmail,
           },
         },
-      },
-    );
+      });
 
     if (error) {
       const msg =
@@ -228,8 +232,8 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         </div>
         <p className="mt-2 text-xs text-slate-500 flex items-center gap-1">
           <Shield className="w-3 h-3 text-emerald-500" />
-          Your card details are processed securely by Stripe and never stored on
-          our servers.
+          Your card details are processed securely by Stripe and never
+          stored on our servers.
         </p>
       </div>
 
@@ -289,15 +293,21 @@ const Payment: React.FC = () => {
     customerName: '',
     tenantId: undefined,
   });
-  const [paymentResult, setPaymentResult] = useState<PaymentResult | null>(
-    null,
-  );
+  const [paymentResult, setPaymentResult] =
+    useState<PaymentResult | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedProduct, setSelectedProduct] =
+    useState<Product | null>(null);
+
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(false);
-  const [sendingCustom, setSendingCustom] = useState(false);
+
   const [tenantSearch, setTenantSearch] = useState<string>('');
+  const [tenantDropdownOpen, setTenantDropdownOpen] =
+    useState<boolean>(false);
+  const tenantBoxRef = useRef<HTMLDivElement | null>(null);
+
+  const [sendingCustom, setSendingCustom] = useState(false);
 
   const pk = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
   const pkMissing = !pk;
@@ -306,7 +316,8 @@ const Payment: React.FC = () => {
     {
       id: 4,
       name: 'Custom',
-      description: 'Send a one-time payment request with a custom amount.',
+      description:
+        'Send a one-time payment request with a custom amount.',
       features: [
         'Ideal for custom contracts',
         'Manual billing alignment',
@@ -318,6 +329,25 @@ const Payment: React.FC = () => {
 
   const isCustom = !!selectedProduct?.allowCustomAmount;
 
+  // Cerrar dropdown de tenants al hacer click fuera
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (
+        tenantBoxRef.current &&
+        !tenantBoxRef.current.contains(target)
+      ) {
+        setTenantDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  // Cargar tenants
   useEffect(() => {
     const loadTenants = async () => {
       try {
@@ -346,12 +376,15 @@ const Payment: React.FC = () => {
     );
   }, [tenants, tenantSearch]);
 
+  // Mantener input sincronizado con tenant seleccionado
   useEffect(() => {
     if (!paymentData.tenantId) {
       setTenantSearch('');
       return;
     }
-    const match = tenants.find((t) => t.tenantId === paymentData.tenantId);
+    const match = tenants.find(
+      (t) => t.tenantId === paymentData.tenantId,
+    );
     if (match) {
       setTenantSearch(match.companyName);
     }
@@ -385,13 +418,18 @@ const Payment: React.FC = () => {
       if (!paymentData.customerEmail.trim()) {
         newErrors.customerEmail = 'Email is required.';
       } else if (
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(paymentData.customerEmail)
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          paymentData.customerEmail,
+        )
       ) {
-        newErrors.customerEmail = 'Enter a valid email address.';
+        newErrors.customerEmail =
+          'Enter a valid email address.';
       }
     }
 
-    const rawAmount = String(paymentData.amount).trim().replace(',', '.');
+    const rawAmount = String(paymentData.amount)
+      .trim()
+      .replace(',', '.');
     const parsedAmount = Number(rawAmount);
 
     if (!rawAmount || Number.isNaN(parsedAmount) || parsedAmount <= 0) {
@@ -404,7 +442,8 @@ const Payment: React.FC = () => {
           'Description is required for custom payments.';
       }
       if (!paymentData.tenantId) {
-        newErrors.tenantId = 'Please select a tenant for this custom payment.';
+        newErrors.tenantId =
+          'Please select a tenant for this custom payment.';
       }
     }
 
@@ -484,6 +523,7 @@ const Payment: React.FC = () => {
     });
     setErrors({});
     setTenantSearch('');
+    setTenantDropdownOpen(false);
   };
 
   const getSidebarAmountLabel = () => {
@@ -511,12 +551,15 @@ const Payment: React.FC = () => {
               Secure Payments Portal
             </h1>
             <p className="text-sm text-slate-600">
-              Manage your subscriptions or send custom payment requests.
+              Manage your subscriptions or send custom payment
+              requests.
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <Shield className="w-4 h-4 text-emerald-500" />
-            <span>PCI-DSS compliant • End-to-end encrypted</span>
+            <span>
+              PCI-DSS compliant • End-to-end encrypted
+            </span>
           </div>
         </div>
 
@@ -530,7 +573,9 @@ const Payment: React.FC = () => {
                 { id: 1, label: 'Plan' },
                 {
                   id: 2,
-                  label: isCustom ? 'Details & send' : 'Details',
+                  label: isCustom
+                    ? 'Details & send'
+                    : 'Details',
                 },
                 { id: 3, label: 'Payment' },
                 { id: 4, label: 'Confirmation' },
@@ -584,8 +629,9 @@ const Payment: React.FC = () => {
                 </h2>
                 <p className="text-sm text-slate-600">
                   Select a subscription plan to charge now, or use{' '}
-                  <strong>Custom</strong> to send a one-time payment request via
-                  email to the tenant&apos;s billing contacts.
+                  <strong>Custom</strong> to send a one-time payment
+                  request via email to the tenant&apos;s billing
+                  contacts.
                 </p>
                 <div className="grid gap-4 sm:grid-cols-4">
                   {products.map((p) => (
@@ -625,7 +671,10 @@ const Payment: React.FC = () => {
                       </p>
                       <ul className="space-y-1 text-[10px] text-slate-500">
                         {p.features?.map((f) => (
-                          <li key={f} className="flex items-center gap-1.5">
+                          <li
+                            key={f}
+                            className="flex items-center gap-1.5"
+                          >
                             <CheckCircle className="w-3 h-3 text-emerald-500" />
                             <span>{f}</span>
                           </li>
@@ -701,7 +750,8 @@ const Payment: React.FC = () => {
                           onChange={(e) =>
                             setPaymentData({
                               ...paymentData,
-                              customerEmail: e.target.value,
+                              customerEmail:
+                                e.target.value,
                             })
                           }
                           className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -759,7 +809,8 @@ const Payment: React.FC = () => {
                           onChange={(e) =>
                             setPaymentData({
                               ...paymentData,
-                              description: e.target.value,
+                              description:
+                                e.target.value,
                             })
                           }
                           className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -777,14 +828,24 @@ const Payment: React.FC = () => {
                         <label className="block text-sm font-medium text-slate-700 mb-1">
                           Tenant *
                         </label>
-                        <div className="relative">
+                        <div
+                          ref={tenantBoxRef}
+                          className="relative"
+                        >
                           <Input
                             placeholder="Select tenant..."
                             aria-label="Tenant"
                             value={tenantSearch}
+                            onFocus={() =>
+                              setTenantDropdownOpen(true)
+                            }
                             onChange={(e) => {
-                              const value = e.target.value;
+                              const value =
+                                e.target.value;
                               setTenantSearch(value);
+                              setTenantDropdownOpen(
+                                true,
+                              );
                               if (!value) {
                                 setPaymentData({
                                   ...paymentData,
@@ -793,26 +854,50 @@ const Payment: React.FC = () => {
                               }
                             }}
                           />
-                          {filteredTenants.length > 0 && (
-                            <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
-                              {filteredTenants.map((t) => (
-                                <button
-                                  key={t.tenantId}
-                                  type="button"
-                                  className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
-                                  onClick={() => {
-                                    setTenantSearch(t.companyName);
-                                    setPaymentData({
-                                      ...paymentData,
-                                      tenantId: t.tenantId,
-                                    });
-                                  }}
-                                >
-                                  {t.companyName} ({t.tenantId})
-                                </button>
-                              ))}
-                            </div>
-                          )}
+                          {tenantDropdownOpen &&
+                            filteredTenants.length >
+                              0 && (
+                              <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+                                {filteredTenants.map(
+                                  (t) => (
+                                    <button
+                                      key={
+                                        t.tenantId
+                                      }
+                                      type="button"
+                                      className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                                      onMouseDown={(
+                                        e,
+                                      ) =>
+                                        e.preventDefault()
+                                      }
+                                      onClick={() => {
+                                        setTenantSearch(
+                                          t.companyName,
+                                        );
+                                        setPaymentData(
+                                          {
+                                            ...paymentData,
+                                            tenantId:
+                                              t.tenantId,
+                                          },
+                                        );
+                                        setTenantDropdownOpen(
+                                          false,
+                                        );
+                                      }}
+                                    >
+                                      {t.companyName}{' '}
+                                      (
+                                      {
+                                        t.tenantId
+                                      }
+                                      )
+                                    </button>
+                                  ),
+                                )}
+                              </div>
+                            )}
                         </div>
                         {loadingTenants && (
                           <p className="text-[10px] text-slate-400 mt-1">
@@ -898,14 +983,17 @@ const Payment: React.FC = () => {
                   Complete your payment
                 </h2>
                 <p className="text-sm text-slate-600">
-                  Enter your card details. We do not store this information.
+                  Enter your card details. We do not store this
+                  information.
                 </p>
 
                 {pkMissing ? (
                   <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm rounded-lg px-3 py-2">
-                    <code>NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> is not
-                    configured. Add your Stripe publishable key to enable
-                    payments.
+                    <code>
+                      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+                    </code>{' '}
+                    is not configured. Add your Stripe publishable key
+                    to enable payments.
                   </div>
                 ) : (
                   <Elements stripe={stripePromise}>
@@ -938,26 +1026,34 @@ const Payment: React.FC = () => {
                         <>
                           We&apos;ve sent a secure payment request for{' '}
                           <span className="font-semibold">
-                            ${paymentResult.amount?.toFixed(2)} USD
+                            $
+                            {paymentResult.amount?.toFixed(
+                              2,
+                            )}{' '}
+                            USD
                           </span>{' '}
-                          to the billing contacts configured for this tenant.
+                          to the billing contacts configured for this
+                          tenant.
                         </>
                       ) : (
                         <>
                           We&apos;ve processed your payment of{' '}
                           <span className="font-semibold">
-                            ${paymentResult.amount?.toFixed(2)}{' '}
+                            $
+                            {paymentResult.amount?.toFixed(2)}{' '}
                             {paymentResult.currency?.toUpperCase()}
                           </span>
                           . A receipt will be sent to your email.
                         </>
                       )}
                     </p>
-                    {!isCustom && paymentResult.paymentIntentId && (
-                      <p className="text-[10px] text-slate-400">
-                        Transaction ID: {paymentResult.paymentIntentId}
-                      </p>
-                    )}
+                    {!isCustom &&
+                      paymentResult.paymentIntentId && (
+                        <p className="text-[10px] text-slate-400">
+                          Transaction ID:{' '}
+                          {paymentResult.paymentIntentId}
+                        </p>
+                      )}
                   </>
                 ) : (
                   <>
@@ -995,13 +1091,17 @@ const Payment: React.FC = () => {
           {/* Right: summary sidebar */}
           <aside className="bg-white/80 backdrop-blur-sm border border-slate-100 rounded-2xl shadow-md p-5 space-y-4">
             <h3 className="text-sm font-semibold text-slate-900">
-              {isCustom ? 'Custom payment summary' : 'Subscription summary'}
+              {isCustom
+                ? 'Custom payment summary'
+                : 'Subscription summary'}
             </h3>
             {selectedProduct ? (
               <>
                 <div className="flex items-baseline justify-between">
                   <div>
-                    <p className="text-xs text-slate-500">Selected option</p>
+                    <p className="text-xs text-slate-500">
+                      Selected option
+                    </p>
                     <p className="text-sm font-semibold text-slate-900">
                       {selectedProduct.name}
                     </p>
@@ -1011,13 +1111,18 @@ const Payment: React.FC = () => {
                       {getSidebarAmountLabel()}
                     </p>
                     <p className="text-[10px] text-slate-500">
-                      {isCustom ? 'USD (one-time)' : 'USD / month'}
+                      {isCustom
+                        ? 'USD (one-time)'
+                        : 'USD / month'}
                     </p>
                   </div>
                 </div>
                 <ul className="mt-2 space-y-1.5 text-[10px] text-slate-600">
                   {selectedProduct.features?.map((f) => (
-                    <li key={f} className="flex items-center gap-1.5">
+                    <li
+                      key={f}
+                      className="flex items-center gap-1.5"
+                    >
                       <CheckCircle className="w-3 h-3 text-emerald-500" />
                       <span>{f}</span>
                     </li>
@@ -1028,7 +1133,9 @@ const Payment: React.FC = () => {
                     Tenant:{' '}
                     {
                       tenants.find(
-                        (t) => t.tenantId === paymentData.tenantId,
+                        (t) =>
+                          t.tenantId ===
+                          paymentData.tenantId,
                       )?.companyName
                     }{' '}
                     ({paymentData.tenantId})
@@ -1044,12 +1151,12 @@ const Payment: React.FC = () => {
             <div className="border-t border-slate-100 pt-3 space-y-1">
               <p className="flex items-center gap-2 text-[10px] text-slate-500">
                 <Shield className="w-3 h-3 text-emerald-500" />
-                Payments and payment links are powered by Stripe. Card details
-                are never stored on our servers.
+                Payments and payment links are powered by Stripe.
+                Card details are never stored on our servers.
               </p>
               <p className="text-[10px] text-slate-400">
-                By continuing, you agree to the platform’s Terms of Service and
-                Privacy Policy.
+                By continuing, you agree to the platform’s Terms of
+                Service and Privacy Policy.
               </p>
             </div>
           </aside>

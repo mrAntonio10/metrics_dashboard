@@ -1,7 +1,7 @@
 // src/app/(feedback)/page.tsx
 'use client';
 
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { ProtectedComponent } from '@/hooks/use-permission';
 import {
@@ -37,6 +37,22 @@ export default function FeedbackPage() {
 
   // 🔍 search solo para company
   const [companySearch, setCompanySearch] = useState<string>('');
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState<boolean>(false);
+  const companyBoxRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (companyBoxRef.current && !companyBoxRef.current.contains(target)) {
+        setCompanyDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const handleDateChange = useCallback(
     (date: Date | null) => {
@@ -86,27 +102,31 @@ export default function FeedbackPage() {
       >
         <div className="flex flex-wrap items-center gap-2">
           {/* Company → forwarded to n8n (input search + dropdown) */}
-          <div className="relative w-[220px]">
+          <div ref={companyBoxRef} className="relative w-[220px]">
             <Input
               placeholder="Filter by company..."
               aria-label="Filter by company"
               value={companySearch}
+              onFocus={() => setCompanyDropdownOpen(true)}
               onChange={(e) => {
                 const value = e.target.value;
                 setCompanySearch(value);
+                setCompanyDropdownOpen(true);
                 if (!value) {
                   updateFilters({ company: 'all' });
                 }
               }}
             />
-            {filteredCompanies.length > 0 && (
+            {companyDropdownOpen && filteredCompanies.length > 0 && (
               <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
                 <button
                   type="button"
                   className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     setCompanySearch('');
                     updateFilters({ company: 'all' });
+                    setCompanyDropdownOpen(false);
                   }}
                 >
                   All companies
@@ -118,9 +138,11 @@ export default function FeedbackPage() {
                       key={c.value}
                       type="button"
                       className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         setCompanySearch(c.label);
                         updateFilters({ company: c.value });
+                        setCompanyDropdownOpen(false);
                       }}
                     >
                       {c.label}

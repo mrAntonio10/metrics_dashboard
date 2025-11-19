@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useTransition, useEffect, useState } from 'react';
+import { useMemo, useTransition, useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
@@ -10,7 +10,6 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-// 👇 NUEVO: si tienes el Input de shadcn
 import { Input } from '@/components/ui/input';
 
 export type Org = { id: string; name: string };
@@ -89,6 +88,10 @@ export default function HomePageClient({
       : orgs.find((o) => o.id === selectedClient)?.name ?? '',
   );
 
+  // Estado de apertura del dropdown + ref para click outside
+  const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const clientBoxRef = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     if (selectedClient === 'all') {
       setClientSearch('');
@@ -97,6 +100,18 @@ export default function HomePageClient({
       setClientSearch(org?.name ?? '');
     }
   }, [selectedClient, orgs]);
+
+  // Cerrar dropdown al hacer click fuera
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (clientBoxRef.current && !clientBoxRef.current.contains(event.target as Node)) {
+        setClientDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleSelectClient = (val: string) => {
     startTransition(() => {
@@ -202,27 +217,31 @@ export default function HomePageClient({
       <PageHeader title="Executive Summary" description="De-identified ops metrics (direct DB).">
         <div className="flex flex-wrap items-center gap-2">
           {/* 🔍 INPUT TEXT SEARCH en vez de Select */}
-          <div className="relative w-[260px]">
+          <div ref={clientBoxRef} className="relative w-[260px]">
             <Input
               aria-busy={isPending}
               placeholder="Search client…"
               value={clientSearch}
+              onFocus={() => setClientDropdownOpen(true)}
               onChange={(e) => {
                 const value = e.target.value;
                 setClientSearch(value);
+                setClientDropdownOpen(true);
                 if (!value) {
                   handleSelectClient('all');
                 }
               }}
             />
-            {filteredOrgsBySearch.length > 0 && (
+            {clientDropdownOpen && filteredOrgsBySearch.length > 0 && (
               <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
                 <button
                   type="button"
                   className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     setClientSearch('');
                     handleSelectClient('all');
+                    setClientDropdownOpen(false);
                   }}
                 >
                   All Clients
@@ -232,9 +251,11 @@ export default function HomePageClient({
                     key={org.id}
                     type="button"
                     className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                    onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
                       setClientSearch(org.name);
                       handleSelectClient(org.id);
+                      setClientDropdownOpen(false);
                     }}
                   >
                     {org.name}

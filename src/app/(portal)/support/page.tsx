@@ -1,7 +1,7 @@
 // src/app/(support)/page.tsx
 'use client';
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
 import { TicketsTable } from '@/components/tickets-table';
@@ -36,6 +36,8 @@ export default function SupportPage() {
   // Filters forwarded to webhook (company, month, status, urgency)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [companySearch, setCompanySearch] = useState<string>('');
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState<boolean>(false);
+  const companyBoxRef = useRef<HTMLDivElement | null>(null);
 
   const {
     tickets,            // webhook data (already filtered by n8n)
@@ -50,6 +52,21 @@ export default function SupportPage() {
     catalogs,           // { availableStatuses?, availableUrgencies? }
     slaPolicy,          // optional SLA policy
   } = useTickets();
+
+  // Cerrar dropdown al hacer click fuera
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (companyBoxRef.current && !companyBoxRef.current.contains(target)) {
+        setCompanyDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   // Mantener el input sincronizado con el filtro actual
   useEffect(() => {
@@ -180,28 +197,32 @@ export default function SupportPage() {
         description="Track ticket volume, SLA performance, and customer satisfaction."
       >
         <div className="flex flex-wrap items-center gap-2">
-          {/* Company → forwarded to n8n (input text search + dropdown) */}
-          <div className="relative w-[240px]">
+          {/* Company → forwarded to n8n (input text search + dropdown controlado) */}
+          <div ref={companyBoxRef} className="relative w-[240px]">
             <Input
               placeholder="Filter by company..."
               aria-label="Filter by company"
               value={companySearch}
+              onFocus={() => setCompanyDropdownOpen(true)}
               onChange={(e) => {
                 const value = e.target.value;
                 setCompanySearch(value);
+                setCompanyDropdownOpen(true);
                 if (!value) {
                   updateFilters({ company: 'all' });
                 }
               }}
             />
-            {filteredCompanies.length > 0 && (
+            {companyDropdownOpen && filteredCompanies.length > 0 && (
               <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
                 <button
                   type="button"
                   className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     setCompanySearch('');
                     updateFilters({ company: 'all' });
+                    setCompanyDropdownOpen(false);
                   }}
                 >
                   All companies
@@ -213,9 +234,11 @@ export default function SupportPage() {
                       key={company.value}
                       type="button"
                       className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
                         setCompanySearch(company.label);
                         updateFilters({ company: company.value });
+                        setCompanyDropdownOpen(false);
                       }}
                     >
                       {company.label}
