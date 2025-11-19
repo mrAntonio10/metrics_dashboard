@@ -1,22 +1,22 @@
 // src/app/(portal)/billing/BillingHeader.tsx
 'use client';
 
-import React, { useMemo } from 'react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useEffect, useMemo, useState } from 'react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 export type Org = { id: string; name: string };
 
-export type BillingHeaderProps = {
+type BillingHeaderProps = {
   orgs: Org[];
-  selectedClient: string;            // 'all' or a tenant id
+  selectedClient: string;
   onSelect: (val: string) => void;
-
-  selectedDate: string;              // 'YYYY-MM-DD' or ''
+  selectedDate: string;            // 'YYYY-MM-DD' o ''
   onDateChange: (val: string) => void;
   onClearFilters: () => void;
 };
 
-function BillingHeaderImpl({
+export default function BillingHeader({
   orgs,
   selectedClient,
   onSelect,
@@ -24,60 +24,92 @@ function BillingHeaderImpl({
   onDateChange,
   onClearFilters,
 }: BillingHeaderProps) {
-  const selectedLabel = useMemo(
-    () =>
-      selectedClient === 'all'
-        ? 'All Clients'
-        : orgs.find((o) => o.id === selectedClient)?.name ?? 'All Clients',
-    [orgs, selectedClient]
+  const [clientSearch, setClientSearch] = useState(
+    selectedClient === 'all'
+      ? ''
+      : orgs.find((o) => o.id === selectedClient)?.name ?? '',
   );
 
+  useEffect(() => {
+    if (selectedClient === 'all') {
+      setClientSearch('');
+    } else {
+      const org = orgs.find((o) => o.id === selectedClient);
+      setClientSearch(org?.name ?? '');
+    }
+  }, [selectedClient, orgs]);
+
+  const filteredOrgsBySearch = useMemo(() => {
+    if (!clientSearch.trim()) return orgs;
+    const q = clientSearch.toLowerCase();
+    return orgs.filter((o) => o.name.toLowerCase().includes(q));
+  }, [orgs, clientSearch]);
+
   return (
-    <div
-      className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-      role="group"
-      aria-label="Billing filters"
-    >
-      {/* Client selector */}
-      <div className="flex items-center gap-2">
-        <Select onValueChange={onSelect} value={selectedClient}>
-          <SelectTrigger className="w-[240px]" aria-label="Select client">
-            <SelectValue placeholder={selectedLabel} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Clients</SelectItem>
-            {orgs.map((o) => (
-              <SelectItem key={o.id} value={o.id}>
-                {o.name}
-              </SelectItem>
+    <div className="flex flex-wrap items-center gap-3">
+      {/* 🔍 INPUT TEXT SEARCH para clients */}
+      <div className="relative w-[260px]">
+        <Input
+          placeholder="Search client…"
+          value={clientSearch}
+          onChange={(e) => {
+            const value = e.target.value;
+            setClientSearch(value);
+            if (!value) {
+              onSelect('all');
+            }
+          }}
+        />
+        {filteredOrgsBySearch.length > 0 && (
+          <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+            <button
+              type="button"
+              className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+              onClick={() => {
+                setClientSearch('');
+                onSelect('all');
+              }}
+            >
+              All Clients
+            </button>
+            {filteredOrgsBySearch.map((org) => (
+              <button
+                key={org.id}
+                type="button"
+                className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  setClientSearch(org.name);
+                  onSelect(org.id);
+                }}
+              >
+                {org.name}
+              </button>
             ))}
-          </SelectContent>
-        </Select>
+          </div>
+        )}
       </div>
 
-      {/* Exact date (YYYY-MM-DD) */}
+      {/* Filtro de fecha exacta (YYYY-MM-DD) */}
       <div className="flex items-center gap-2">
-        <label htmlFor="billing-date" className="sr-only">
-          Filter by exact date
-        </label>
-        <input
-          id="billing-date"
+        <Input
           type="date"
-          className="border rounded px-2 py-1 text-sm h-9"
           value={selectedDate}
-          onChange={(e) => onDateChange(e.target.value)} // e.g. '2025-11-20'
+          onChange={(e) => onDateChange(e.target.value)}
+          className="w-[170px]"
         />
-        <button
+        <Button
           type="button"
-          className="text-xs underline ml-2"
-          onClick={onClearFilters}
-          aria-label="Clear client and date filters"
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            setClientSearch('');
+            onSelect('all');
+            onClearFilters();
+          }}
         >
-          Clear
-        </button>
+          Clear filters
+        </Button>
       </div>
     </div>
   );
 }
-
-export default React.memo(BillingHeaderImpl);

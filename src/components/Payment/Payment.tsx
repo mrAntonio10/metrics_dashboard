@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Elements,
   CardElement,
@@ -19,6 +19,7 @@ import {
   DollarSign,
   User,
 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
 
 /* Types */
 
@@ -296,33 +297,12 @@ const Payment: React.FC = () => {
   const [tenants, setTenants] = useState<TenantSummary[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(false);
   const [sendingCustom, setSendingCustom] = useState(false);
+  const [tenantSearch, setTenantSearch] = useState<string>('');
 
   const pk = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
   const pkMissing = !pk;
 
   const products: Product[] = [
-    // {
-    //   id: 1,
-    //   name: 'Starter',
-    //   price: 19,
-    //   description: 'For small teams and early-stage projects.',
-    //   features: ['Up to 3 organizations', 'Core reports', 'Email support'],
-    // },
-    // {
-    //   id: 2,
-    //   name: 'Growth',
-    //   price: 49,
-    //   description: 'Best for growing teams that need visibility.',
-    //   features: ['Unlimited organizations', 'Advanced analytics', 'Priority support'],
-    //   highlight: true,
-    // },
-    // {
-    //   id: 3,
-    //   name: 'Enterprise',
-    //   price: 99,
-    //   description: 'Designed for mission-critical multi-tenant environments.',
-    //   features: ['Dedicated SLA', 'Guided onboarding', 'Advanced integrations'],
-    // },
     {
       id: 4,
       name: 'Custom',
@@ -354,6 +334,28 @@ const Payment: React.FC = () => {
     };
     loadTenants();
   }, []);
+
+  const filteredTenants = useMemo(() => {
+    if (!tenants?.length) return [];
+    if (!tenantSearch.trim()) return tenants;
+    const q = tenantSearch.toLowerCase();
+    return tenants.filter(
+      (t) =>
+        t.companyName.toLowerCase().includes(q) ||
+        t.tenantId.toLowerCase().includes(q),
+    );
+  }, [tenants, tenantSearch]);
+
+  useEffect(() => {
+    if (!paymentData.tenantId) {
+      setTenantSearch('');
+      return;
+    }
+    const match = tenants.find((t) => t.tenantId === paymentData.tenantId);
+    if (match) {
+      setTenantSearch(match.companyName);
+    }
+  }, [paymentData.tenantId, tenants]);
 
   const goToStep = (step: number) => setCurrentStep(step);
 
@@ -481,6 +483,7 @@ const Payment: React.FC = () => {
       tenantId: undefined,
     });
     setErrors({});
+    setTenantSearch('');
   };
 
   const getSidebarAmountLabel = () => {
@@ -692,7 +695,6 @@ const Payment: React.FC = () => {
                         Work email *
                       </label>
                       <div className="relative">
-                        {/* Re-using DollarSign would be weird; omit icon */}
                         <input
                           type="email"
                           value={paymentData.customerEmail}
@@ -770,28 +772,48 @@ const Payment: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Tenant selector */}
+                      {/* Tenant selector (searchable input + dropdown) */}
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">
                           Tenant *
                         </label>
-                        <select
-                          value={paymentData.tenantId || ''}
-                          onChange={(e) =>
-                            setPaymentData({
-                              ...paymentData,
-                              tenantId: e.target.value || undefined,
-                            })
-                          }
-                          className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        >
-                          <option value="">Select tenant...</option>
-                          {tenants.map((t) => (
-                            <option key={t.tenantId} value={t.tenantId}>
-                              {t.companyName} ({t.tenantId})
-                            </option>
-                          ))}
-                        </select>
+                        <div className="relative">
+                          <Input
+                            placeholder="Select tenant..."
+                            aria-label="Tenant"
+                            value={tenantSearch}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setTenantSearch(value);
+                              if (!value) {
+                                setPaymentData({
+                                  ...paymentData,
+                                  tenantId: undefined,
+                                });
+                              }
+                            }}
+                          />
+                          {filteredTenants.length > 0 && (
+                            <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+                              {filteredTenants.map((t) => (
+                                <button
+                                  key={t.tenantId}
+                                  type="button"
+                                  className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                                  onClick={() => {
+                                    setTenantSearch(t.companyName);
+                                    setPaymentData({
+                                      ...paymentData,
+                                      tenantId: t.tenantId,
+                                    });
+                                  }}
+                                >
+                                  {t.companyName} ({t.tenantId})
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                         {loadingTenants && (
                           <p className="text-[10px] text-slate-400 mt-1">
                             Loading tenants...

@@ -1,7 +1,7 @@
 // src/app/(support)/page.tsx
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
 import { TicketsTable } from '@/components/tickets-table';
@@ -12,6 +12,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { ProtectedComponent } from '@/hooks/use-permission';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 
@@ -34,6 +35,7 @@ const diffMinutes = (a?: string, b?: string) => {
 export default function SupportPage() {
   // Filters forwarded to webhook (company, month, status, urgency)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [companySearch, setCompanySearch] = useState<string>('');
 
   const {
     tickets,            // webhook data (already filtered by n8n)
@@ -48,6 +50,29 @@ export default function SupportPage() {
     catalogs,           // { availableStatuses?, availableUrgencies? }
     slaPolicy,          // optional SLA policy
   } = useTickets();
+
+  // Mantener el input sincronizado con el filtro actual
+  useEffect(() => {
+    if (!filters.company || filters.company === 'all') {
+      setCompanySearch('');
+      return;
+    }
+    const match = companies.find((c) => c.value === filters.company);
+    if (match) {
+      setCompanySearch(match.label);
+    }
+  }, [filters.company, companies]);
+
+  const filteredCompanies = useMemo(() => {
+    if (!companies?.length) return [];
+    if (!companySearch.trim()) return companies;
+    const q = companySearch.toLowerCase();
+    return companies.filter(
+      (c) =>
+        c.label.toLowerCase().includes(q) ||
+        c.value.toLowerCase().includes(q),
+    );
+  }, [companies, companySearch]);
 
   // Month (DatePicker) → sent as 'YYYY-MM'
   const handleDateChange = useCallback(
@@ -155,22 +180,50 @@ export default function SupportPage() {
         description="Track ticket volume, SLA performance, and customer satisfaction."
       >
         <div className="flex flex-wrap items-center gap-2">
-          {/* Company → forwarded to n8n */}
-          <Select
-            value={filters.company}
-            onValueChange={(value) => updateFilters({ company: value })}
-          >
-            <SelectTrigger className="w-[200px]" aria-label="Filter by company">
-              <SelectValue placeholder="Filter by company..." />
-            </SelectTrigger>
-            <SelectContent>
-              {companies.map((company) => (
-                <SelectItem key={company.value} value={company.value}>
-                  {company.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Company → forwarded to n8n (input text search + dropdown) */}
+          <div className="relative w-[240px]">
+            <Input
+              placeholder="Filter by company..."
+              aria-label="Filter by company"
+              value={companySearch}
+              onChange={(e) => {
+                const value = e.target.value;
+                setCompanySearch(value);
+                if (!value) {
+                  updateFilters({ company: 'all' });
+                }
+              }}
+            />
+            {filteredCompanies.length > 0 && (
+              <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+                <button
+                  type="button"
+                  className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => {
+                    setCompanySearch('');
+                    updateFilters({ company: 'all' });
+                  }}
+                >
+                  All companies
+                </button>
+                {filteredCompanies
+                  .filter((c) => c.value !== 'all')
+                  .map((company) => (
+                    <button
+                      key={company.value}
+                      type="button"
+                      className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                      onClick={() => {
+                        setCompanySearch(company.label);
+                        updateFilters({ company: company.value });
+                      }}
+                    >
+                      {company.label}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
 
           {/* Month (DatePicker) → forwarded to n8n */}
           <div className="flex items-center gap-2">
@@ -252,7 +305,6 @@ export default function SupportPage() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
-
           <Card>
             <CardHeader>
               <CardTitle>SLA Attainment</CardTitle>

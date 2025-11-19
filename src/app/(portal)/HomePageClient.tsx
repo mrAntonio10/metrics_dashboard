@@ -10,7 +10,8 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+// 👇 NUEVO: si tienes el Input de shadcn
+import { Input } from '@/components/ui/input';
 
 export type Org = { id: string; name: string };
 export type CountRow = {
@@ -81,6 +82,22 @@ export default function HomePageClient({
   const [statuses, setStatuses] = useState<Record<string, TenantStatus>>({});
   const [deploying, setDeploying] = useState<string | null>(null);
 
+  // 🔍 Texto de búsqueda para CLIENTS
+  const [clientSearch, setClientSearch] = useState(
+    selectedClient === 'all'
+      ? ''
+      : orgs.find((o) => o.id === selectedClient)?.name ?? '',
+  );
+
+  useEffect(() => {
+    if (selectedClient === 'all') {
+      setClientSearch('');
+    } else {
+      const org = orgs.find((o) => o.id === selectedClient);
+      setClientSearch(org?.name ?? '');
+    }
+  }, [selectedClient, orgs]);
+
   const handleSelectClient = (val: string) => {
     startTransition(() => {
       const params = new URLSearchParams(search.toString());
@@ -89,6 +106,13 @@ export default function HomePageClient({
       router.replace(`${pathname}?${params.toString()}`);
     });
   };
+
+  // Lista de orgs filtrados por el texto ingresado
+  const filteredOrgsBySearch = useMemo(() => {
+    if (!clientSearch.trim()) return orgs;
+    const q = clientSearch.toLowerCase();
+    return orgs.filter((o) => o.name.toLowerCase().includes(q));
+  }, [orgs, clientSearch]);
 
   const filtered = useMemo(
     () => (selectedClient === 'all' ? counts : counts.filter((c) => c.tenantId === selectedClient)),
@@ -177,28 +201,48 @@ export default function HomePageClient({
     <ProtectedComponent permissionKey="page:home" fallback={<AccessDeniedFallback />}>
       <PageHeader title="Executive Summary" description="De-identified ops metrics (direct DB).">
         <div className="flex flex-wrap items-center gap-2">
-          <Select
-            onValueChange={handleSelectClient}
-            value={selectedClient === 'all' ? undefined : selectedClient}
-          >
-            <SelectTrigger className="w-[220px]" aria-busy={isPending}>
-              <SelectValue
-                placeholder={
-                  selectedClient === 'all'
-                    ? 'All Clients'
-                    : orgs.find((o) => o.id === selectedClient)?.name || 'All Clients'
+          {/* 🔍 INPUT TEXT SEARCH en vez de Select */}
+          <div className="relative w-[260px]">
+            <Input
+              aria-busy={isPending}
+              placeholder="Search client…"
+              value={clientSearch}
+              onChange={(e) => {
+                const value = e.target.value;
+                setClientSearch(value);
+                if (!value) {
+                  handleSelectClient('all');
                 }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Clients</SelectItem>
-              {orgs.map((org) => (
-                <SelectItem key={org.id} value={org.id}>
-                  {org.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              }}
+            />
+            {filteredOrgsBySearch.length > 0 && (
+              <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+                <button
+                  type="button"
+                  className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => {
+                    setClientSearch('');
+                    handleSelectClient('all');
+                  }}
+                >
+                  All Clients
+                </button>
+                {filteredOrgsBySearch.map((org) => (
+                  <button
+                    key={org.id}
+                    type="button"
+                    className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                    onClick={() => {
+                      setClientSearch(org.name);
+                      handleSelectClient(org.id);
+                    }}
+                  >
+                    {org.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </PageHeader>
 
@@ -316,7 +360,6 @@ export default function HomePageClient({
                     : status === 'SUBSCRIBED'
                       ? `✅ SUBSCRIBED (renew by ${formatLocal(renewalDate) ?? 'N/A'})`
                       : `⏳ TRIAL (until ${formatLocal(renewalDate) ?? 'N/A'})`;
-
 
             const docker = statuses[t.tenantId];
             const isRunning = docker?.overall === 'up';

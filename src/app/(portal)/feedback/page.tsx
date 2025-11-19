@@ -1,7 +1,7 @@
 // src/app/(feedback)/page.tsx
 'use client';
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { ProtectedComponent } from '@/hooks/use-permission';
 import {
@@ -17,6 +17,7 @@ import 'react-datepicker/dist/react-datepicker.css';
 
 import { useFeedback } from '@/hooks/use-feedbacks'; // hook name intentionally singular
 import { FeedbackTable } from '@/components/feedback-table';
+import { Input } from '@/components/ui/input';
 
 export default function FeedbackPage() {
   const {
@@ -33,6 +34,9 @@ export default function FeedbackPage() {
 
   // Month (DatePicker) → forwarded to webhook as 'YYYY-MM'
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+  // 🔍 search solo para company
+  const [companySearch, setCompanySearch] = useState<string>('');
 
   const handleDateChange = useCallback(
     (date: Date | null) => {
@@ -51,6 +55,29 @@ export default function FeedbackPage() {
 
   const companyOptions = useMemo(() => companies, [companies]);
 
+  // sincroniza el input con el filtro actual
+  useEffect(() => {
+    if (!filters.company || filters.company === 'all') {
+      setCompanySearch('');
+      return;
+    }
+    const match = companyOptions.find((c) => c.value === filters.company);
+    if (match) {
+      setCompanySearch(match.label);
+    }
+  }, [filters.company, companyOptions]);
+
+  const filteredCompanies = useMemo(() => {
+    if (!companyOptions?.length) return [];
+    if (!companySearch.trim()) return companyOptions;
+    const q = companySearch.toLowerCase();
+    return companyOptions.filter(
+      (c) =>
+        c.label.toLowerCase().includes(q) ||
+        c.value.toLowerCase().includes(q),
+    );
+  }, [companyOptions, companySearch]);
+
   return (
     <ProtectedComponent permissionKey="page:feedback">
       <PageHeader
@@ -58,22 +85,50 @@ export default function FeedbackPage() {
         description="Browse customer opinions by company and month."
       >
         <div className="flex flex-wrap items-center gap-2">
-          {/* Company → forwarded to n8n */}
-          <Select
-            value={filters.company}
-            onValueChange={(v) => updateFilters({ company: v })}
-          >
-            <SelectTrigger className="w-[220px]" aria-label="Filter by company">
-              <SelectValue placeholder="Filter by company..." />
-            </SelectTrigger>
-            <SelectContent>
-              {companyOptions.map((c) => (
-                <SelectItem key={c.value} value={c.value}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Company → forwarded to n8n (input search + dropdown) */}
+          <div className="relative w-[220px]">
+            <Input
+              placeholder="Filter by company..."
+              aria-label="Filter by company"
+              value={companySearch}
+              onChange={(e) => {
+                const value = e.target.value;
+                setCompanySearch(value);
+                if (!value) {
+                  updateFilters({ company: 'all' });
+                }
+              }}
+            />
+            {filteredCompanies.length > 0 && (
+              <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+                <button
+                  type="button"
+                  className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                  onClick={() => {
+                    setCompanySearch('');
+                    updateFilters({ company: 'all' });
+                  }}
+                >
+                  All companies
+                </button>
+                {filteredCompanies
+                  .filter((c) => c.value !== 'all')
+                  .map((c) => (
+                    <button
+                      key={c.value}
+                      type="button"
+                      className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                      onClick={() => {
+                        setCompanySearch(c.label);
+                        updateFilters({ company: c.value });
+                      }}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
 
           {/* Month (DatePicker) → forwarded to n8n */}
           <div className="flex items-center gap-2">

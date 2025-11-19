@@ -54,6 +54,8 @@ import {
   Legend,
 } from 'recharts';
 
+import { Input } from '@/components/ui/input';
+
 /* =========================
  * Types: Metrics / Docker
  * ========================= */
@@ -780,6 +782,9 @@ export default function UsagePage() {
     getDefaultBillingMonth(),
   );
 
+  const [clientSearch, setClientSearch] =
+    useState<string>('');
+
   const availableDates = useUsageDates();
   const { data, loading, error } = useMetrics(date);
   const {
@@ -805,6 +810,9 @@ export default function UsagePage() {
   const [anthropicPage, setAnthropicPage] =
     useState<number>(1);
   const anthropicPageSize = 10;
+
+  const [anthropicTenantSearch, setAnthropicTenantSearch] =
+    useState<string>('');
 
   const monthOptions = useMemo(
     () => getRecentMonths(12),
@@ -859,6 +867,30 @@ export default function UsagePage() {
     [anthropicRows],
   );
 
+  const filteredClients = useMemo(() => {
+    if (!clients || clients.length === 0) return [];
+    if (!clientSearch.trim()) return clients;
+    const q = clientSearch.toLowerCase();
+    return clients.filter((id) =>
+      resolveClientName(id, data?.client_display)
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [clients, clientSearch, data?.client_display]);
+
+  const filteredAnthropicTenants = useMemo(() => {
+    if (!anthropicTenants || anthropicTenants.length === 0)
+      return [];
+    if (!anthropicTenantSearch.trim())
+      return anthropicTenants;
+    const q = anthropicTenantSearch.toLowerCase();
+    return anthropicTenants.filter((id) =>
+      (id === 'all' ? 'All tenants' : id)
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [anthropicTenants, anthropicTenantSearch]);
+
   const anthropicFiltered = useMemo(() => {
     const list = (anthropicRows || [])
       .filter(
@@ -884,7 +916,8 @@ export default function UsagePage() {
       anthropicPage || 1,
       totalPages,
     );
-    const start = (current - 1) * anthropicPageSize;
+    const start =
+      (current - 1) * anthropicPageSize;
     const pageItems = list.slice(
       start,
       start + anthropicPageSize,
@@ -906,6 +939,31 @@ export default function UsagePage() {
     // reset a página 1 cuando cambie tenant o dataset
     setAnthropicPage(1);
   }, [anthropicTenant, anthropicRows.length]);
+
+  useEffect(() => {
+    // sincroniza el texto del input de client con el cliente seleccionado
+    if (client === 'all') {
+      setClientSearch('');
+    } else {
+      setClientSearch(
+        resolveClientName(
+          client,
+          data?.client_display,
+        ),
+      );
+    }
+  }, [client, data?.client_display]);
+
+  useEffect(() => {
+    // sincroniza el input de tenant Anthropic con el tenant seleccionado
+    if (anthropicTenant === 'all') {
+      setAnthropicTenantSearch('');
+    } else {
+      setAnthropicTenantSearch(
+        anthropicTenant,
+      );
+    }
+  }, [anthropicTenant]);
 
   const onClientChange = useCallback(
     (v: string) => setClient(v),
@@ -948,33 +1006,60 @@ export default function UsagePage() {
             description="Per-client Docker metrics, AWS usage, monthly billing, and Anthropic token usage."
           >
             <div className="flex flex-wrap items-center gap-2">
-              {/* Client filter */}
-              <Select
-                value={client}
-                onValueChange={onClientChange}
-              >
-                <SelectTrigger
-                  className="w-[220px]"
+              {/* Client filter - ahora INPUT SEARCH */}
+              <div className="relative w-[220px]">
+                <Input
+                  placeholder="Filter by client..."
                   aria-label="Filter by client"
-                >
-                  <SelectValue placeholder="Filter by client..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients.map((c) => (
-                    <SelectItem
-                      key={c}
-                      value={c}
+                  value={clientSearch}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setClientSearch(v);
+                    if (!v) {
+                      onClientChange('all');
+                    }
+                  }}
+                />
+                {filteredClients.length > 0 && (
+                  <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+                    <button
+                      type="button"
+                      className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                      onClick={() => {
+                        setClientSearch('');
+                        onClientChange('all');
+                      }}
                     >
-                      {resolveClientName(
-                        c,
-                        data?.client_display,
-                      )}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                      All Clients
+                    </button>
+                    {filteredClients
+                      .filter((id) => id !== 'all')
+                      .map((id) => (
+                        <button
+                          key={id}
+                          type="button"
+                          className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                          onClick={() => {
+                            setClientSearch(
+                              resolveClientName(
+                                id,
+                                data?.client_display,
+                              ),
+                            );
+                            onClientChange(id);
+                          }}
+                        >
+                          {resolveClientName(
+                            id,
+                            data?.client_display,
+                          )}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
 
-              {/* Date selector */}
+              {/* Date selector (Select normal) */}
               <Select
                 value={date}
                 onValueChange={onDateChange}
@@ -1241,33 +1326,54 @@ export default function UsagePage() {
                       <CardTitle>
                         Anthropic Token Usage by Tenant
                       </CardTitle>
-                      
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs text-muted-foreground">
                         Tenant
                       </span>
-                      <Select
-                        value={anthropicTenant}
-                        onValueChange={onAnthropicTenantChange}
-                      >
-                        <SelectTrigger
-                          className="w-[220px]"
+                      <div className="relative w-[220px]">
+                        <Input
+                          placeholder="All tenants"
                           aria-label="Filter Anthropic usage by tenant"
-                        >
-                          <SelectValue placeholder="All tenants" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {anthropicTenants.map((t) => (
-                            <SelectItem
-                              key={t}
-                              value={t}
+                          value={anthropicTenantSearch}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setAnthropicTenantSearch(v);
+                            if (!v) {
+                              onAnthropicTenantChange('all');
+                            }
+                          }}
+                        />
+                        {filteredAnthropicTenants.length > 0 && (
+                          <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
+                            <button
+                              type="button"
+                              className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                              onClick={() => {
+                                setAnthropicTenantSearch('');
+                                onAnthropicTenantChange('all');
+                              }}
                             >
-                              {t === 'all' ? 'All tenants' : t}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                              All tenants
+                            </button>
+                            {filteredAnthropicTenants
+                              .filter((t) => t !== 'all')
+                              .map((t) => (
+                                <button
+                                  key={t}
+                                  type="button"
+                                  className="block w-full px-2 py-1 text-left hover:bg-accent hover:text-accent-foreground"
+                                  onClick={() => {
+                                    setAnthropicTenantSearch(t);
+                                    onAnthropicTenantChange(t);
+                                  }}
+                                >
+                                  {t}
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-3 text-sm">
