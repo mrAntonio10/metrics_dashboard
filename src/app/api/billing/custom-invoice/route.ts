@@ -3,10 +3,30 @@ import fs from 'fs/promises';
 import path from 'path';
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20',
-});
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
+// ---------- Stripe helper (lazy initialization) ----------
+let stripeClient: Stripe | null = null;
+
+function getStripe(): Stripe {
+  const key = process.env.STRIPE_SECRET_KEY;
+
+  if (!key) {
+    // En runtime, si falta la key, lanzamos error claro.
+    throw new Error('STRIPE_SECRET_KEY is not set in environment');
+  }
+
+  if (!stripeClient) {
+    stripeClient = new Stripe(key, {
+      apiVersion: '2024-06-20',
+    });
+  }
+
+  return stripeClient;
+}
+
+// ---------- Tenants / configuración ----------
 const TENANTS_DIR = process.env.TENANTS_DIR || '/data/vivace-vivace-api';
 const ENV_PREFIX = '.env.';
 
@@ -14,23 +34,30 @@ const ENV_PREFIX = '.env.';
 const BILLING_WEBHOOK =
   'https://n8n.uqminds.org/webhook/invoice/8face104-05ef-4944-b956-de775fbf389d';
 
+// ---------- Utils ----------
 function parseDotenv(text: string): Record<string, string> {
   const out: Record<string, string> = {};
+
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
+
     const i = line.indexOf('=');
     if (i < 0) continue;
+
     const key = line.slice(0, i).trim();
     let val = line.slice(i + 1).trim();
+
     if (
       (val.startsWith('"') && val.endsWith('"')) ||
       (val.startsWith("'") && val.endsWith("'"))
     ) {
       val = val.slice(1, -1);
     }
+
     out[key] = val;
   }
+
   return out;
 }
 
@@ -134,7 +161,9 @@ function renderCustomHTML(opts: {
 
       ${
         paymentIntentId
-          ? `<div class="box">Stripe PaymentIntent ID: <strong>${esc(paymentIntentId)}</strong></div>`
+          ? `<div class="box">Stripe PaymentIntent ID: <strong>${esc(
+              paymentIntentId,
+            )}</strong></div>`
           : ''
       }
 
@@ -147,6 +176,7 @@ function renderCustomHTML(opts: {
 </html>`;
 }
 
+// ---------- Handler POST ----------
 export async function POST(req: Request) {
   try {
     if (!BILLING_WEBHOOK) {
@@ -164,9 +194,11 @@ export async function POST(req: Request) {
       description,
       customerName,
       customerEmail, // opcional
+      // ignoramos cualquier paymentIntentId entrante, siempre generamos uno nuevo aquí
       paymentIntentId: _ignoredPaymentIntentId,
     } = body || {};
 
+    // ---------- Validaciones básicas ----------
     if (!tenantId || !amount) {
       return NextResponse.json(
         {
@@ -185,6 +217,7 @@ export async function POST(req: Request) {
       );
     }
 
+    // ---------- Cargar configuración del tenant ----------
     let tenant;
     try {
       tenant = await findTenantEnv(tenantId);
@@ -199,14 +232,17 @@ export async function POST(req: Request) {
       );
     }
 
-    // ⭐ 1) Crear PaymentIntent en Stripe (ACH / us_bank_account)
+    // ---------- Crear PaymentIntent (ACH / us_bank_account) ----------
     let paymentIntentId: string | undefined;
     let paymentIntentClientSecret: string | undefined;
 
     try {
+      const stripe = getStripe();
+
       const pi = await stripe.paymentIntents.create({
         amount: Math.round(numericAmount * 100),
-        currency: String(currency || 'USD').toLowerCase(), // ACH solo USD
+        // ACH us_bank_account solo funciona en USD
+        currency: String(currency || 'USD').toLowerCase(),
         payment_method_types: ['us_bank_account'],
         description: description || 'Custom bank payment',
         metadata: {
@@ -231,7 +267,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ⭐ 2) Render HTML incluyendo el PaymentIntent ID
+    // ---------- Render HTML del resumen ----------
     const html = renderCustomHTML({
       companyName: tenant.companyName,
       description,
@@ -248,6 +284,7 @@ export async function POST(req: Request) {
 
     const DETAIL = `Custom payment for tenant=${tenant.tenantId}, PI=${paymentIntentId || 'n/a'}`;
 
+    // ---------- Destinatarios de correo ----------
     const tenantEmails = tenant.invoiceEmails || [];
     const fallbackEmail =
       typeof customerEmail === 'string' && customerEmail.trim()
@@ -269,7 +306,7 @@ export async function POST(req: Request) {
           : []
     ).filter((v, i, arr) => arr.indexOf(v) === i);
 
-    // ⭐ 3) Incluir PaymentIntent ID + client_secret en el payload hacia n8n
+    // ---------- Payload hacia n8n (Google Sheet + email, etc.) ----------
     const payload = {
       DESCRIPTION: description || 'Custom payment',
       QUANTITY: 1,
@@ -313,11 +350,14 @@ export async function POST(req: Request) {
       );
     }
 
+    // Puedes devolver también el client_secret si algún día quieres
+    // tener un flujo directo front → Stripe usando este endpoint.
     return NextResponse.json({
       ok: true,
       tenantId: tenant.tenantId,
       status: resp.status,
       paymentIntentId,
+      // paymentIntentClientSecret, // si lo necesitas del lado del front
     });
   } catch (error: any) {
     console.error('Error in /api/billing/custom-invoice', error);
