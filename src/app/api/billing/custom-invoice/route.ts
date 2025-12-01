@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
+import Stripe from 'stripe';
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  apiVersion: '2024-06-20',
+});
 
 const TENANTS_DIR = process.env.TENANTS_DIR || '/data/vivace-vivace-api';
 const ENV_PREFIX = '.env.';
@@ -68,7 +73,6 @@ async function findTenantEnv(tenantId: string) {
   };
 }
 
-
 function esc(s: any) {
   return String(s ?? '').replace(/[&<>]/g, (c) => {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!;
@@ -128,10 +132,11 @@ function renderCustomHTML(opts: {
       <div class="label">Billed to</div>
       <div class="value">${esc(customerName || 'Client')}</div>
 
-      ${paymentIntentId
-      ? `<div class="box">Stripe PaymentIntent ID: <strong>${esc(paymentIntentId)}</strong></div>`
-      : ''
-    }
+      ${
+        paymentIntentId
+          ? `<div class="box">Stripe PaymentIntent ID: <strong>${esc(paymentIntentId)}</strong></div>`
+          : ''
+      }
 
       <p class="muted">
         This email confirms your custom payment request. If you have questions, please reply directly to this message.
@@ -158,8 +163,8 @@ export async function POST(req: Request) {
       currency = 'USD',
       description,
       customerName,
-      customerEmail, // opcional (por si en algún flujo lo envías)
-      paymentIntentId,
+      customerEmail, // opcional
+      paymentIntentId: _ignoredPaymentIntentId,
     } = body || {};
 
     if (!tenantId || !amount) {
@@ -194,6 +199,39 @@ export async function POST(req: Request) {
       );
     }
 
+    // ⭐ 1) Crear PaymentIntent en Stripe (ACH / us_bank_account)
+    let paymentIntentId: string | undefined;
+    let paymentIntentClientSecret: string | undefined;
+
+    try {
+      const pi = await stripe.paymentIntents.create({
+        amount: Math.round(numericAmount * 100),
+        currency: String(currency || 'USD').toLowerCase(), // ACH solo USD
+        payment_method_types: ['us_bank_account'],
+        description: description || 'Custom bank payment',
+        metadata: {
+          tenantId: tenant.tenantId,
+          companyKey: tenant.companyKey,
+          type: 'custom_invoice',
+        },
+      });
+
+      paymentIntentId = pi.id;
+      paymentIntentClientSecret = pi.client_secret ?? undefined;
+    } catch (err: any) {
+      console.error('Error creating Stripe PaymentIntent', err);
+      return NextResponse.json(
+        {
+          error: true,
+          message:
+            err?.message ||
+            'Error creating PaymentIntent in Stripe',
+        },
+        { status: 500 },
+      );
+    }
+
+    // ⭐ 2) Render HTML incluyendo el PaymentIntent ID
     const html = renderCustomHTML({
       companyName: tenant.companyName,
       description,
@@ -231,6 +269,7 @@ export async function POST(req: Request) {
           : []
     ).filter((v, i, arr) => arr.indexOf(v) === i);
 
+    // ⭐ 3) Incluir PaymentIntent ID + client_secret en el payload hacia n8n
     const payload = {
       DESCRIPTION: description || 'Custom payment',
       QUANTITY: 1,
@@ -245,6 +284,8 @@ export async function POST(req: Request) {
       FILE_BASE64,
       FILE_NAME,
       FILE_MIME,
+      PAYMENT_INTENT_ID: paymentIntentId || null,
+      PAYMENT_INTENT_CLIENT_SECRET: paymentIntentClientSecret || null,
     };
 
     const resp = await fetch(BILLING_WEBHOOK, {
@@ -276,6 +317,7 @@ export async function POST(req: Request) {
       ok: true,
       tenantId: tenant.tenantId,
       status: resp.status,
+      paymentIntentId,
     });
   } catch (error: any) {
     console.error('Error in /api/billing/custom-invoice', error);
