@@ -2,10 +2,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20', // o la que uses
-});
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
+// -------- Stripe helper (lazy init) --------
+let stripeClient: Stripe | null = null;
+
+function getStripe(): Stripe {
+  const key = process.env.STRIPE_SECRET_KEY;
+
+  if (!key) {
+    // No lo evaluamos en top-level, solo cuando alguien llama al endpoint
+    throw new Error('STRIPE_SECRET_KEY is not set in environment');
+  }
+
+  if (!stripeClient) {
+    stripeClient = new Stripe(key, {
+      apiVersion: '2024-06-20',
+    });
+  }
+
+  return stripeClient;
+}
+
+// -------- Handler POST --------
 export async function POST(req: NextRequest) {
   try {
     const { amount, customerEmail, customerName, description } =
@@ -19,14 +39,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const stripe = getStripe(); // ⬅️ aquí usamos el helper
+
     const paymentIntent = await stripe.paymentIntents.create({
       amount: Math.round(n * 100), // a centavos
-      currency: 'usd',             // ACH solo USD
+      currency: 'usd', // ACH solo USD
       payment_method_types: ['us_bank_account'],
       description: description || 'Bank transfer payment',
       receipt_email: customerEmail || undefined,
       metadata: {
         customer_name: customerName || '',
+        type: 'ach_bank_payment',
       },
     });
 
