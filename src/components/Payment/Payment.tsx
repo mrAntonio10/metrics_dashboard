@@ -25,6 +25,7 @@ import {
   User,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import BankAccountPaymentForm from './BankAccountPayment';
 
 /* Types */
 
@@ -43,15 +44,15 @@ interface TenantSummary {
   companyName: string;
 }
 
-interface PaymentData {
+export interface PaymentData {
   amount: string;
   description: string;
-  customerEmail: string; // usado solo en suscripciones
+  customerEmail: string;
   customerName: string;
   tenantId?: string;
 }
 
-interface PaymentResult {
+export interface PaymentResult {
   paymentIntentId?: string;
   amount?: number;
   currency?: string;
@@ -59,7 +60,7 @@ interface PaymentResult {
   error?: string;
 }
 
-interface PaymentFormProps {
+export interface PaymentFormProps {
   paymentData: PaymentData;
   onSuccess: (result: PaymentResult) => void;
   onError: (error: string) => void;
@@ -140,7 +141,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({
         } else {
           setPaymentError(
             data?.error ||
-              'Unable to initialize the payment. Please try again.',
+            'Unable to initialize the payment. Please try again.',
           );
         }
       } catch (err) {
@@ -475,8 +476,8 @@ const Payment: React.FC = () => {
       if (!res.ok || data.error) {
         throw new Error(
           data.message ||
-            data.error ||
-            'Unable to send the payment request. Please try again.',
+          data.error ||
+          'Unable to send the payment request. Please try again.',
         );
       }
 
@@ -591,8 +592,8 @@ const Payment: React.FC = () => {
                           completed
                             ? 'bg-emerald-500 text-white'
                             : active
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-100 text-slate-500',
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-slate-100 text-slate-500',
                         ].join(' ')}
                       >
                         {completed ? (
@@ -606,8 +607,8 @@ const Payment: React.FC = () => {
                           active
                             ? 'text-blue-700'
                             : completed
-                            ? 'text-slate-500'
-                            : 'text-slate-400'
+                              ? 'text-slate-500'
+                              : 'text-slate-400'
                         }
                       >
                         {step.label}
@@ -856,7 +857,7 @@ const Payment: React.FC = () => {
                           />
                           {tenantDropdownOpen &&
                             filteredTenants.length >
-                              0 && (
+                            0 && (
                               <div className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-md border bg-popover text-popover-foreground text-sm shadow-md">
                                 {filteredTenants.map(
                                   (t) => (
@@ -977,7 +978,7 @@ const Payment: React.FC = () => {
             )}
 
             {/* Step 3: card payment (solo si no es custom) */}
-            {currentStep === 3 && !isCustom && (
+            {/* {currentStep === 3 && !isCustom && (
               <div className="space-y-4">
                 <h2 className="text-lg font-semibold text-slate-900">
                   Complete your payment
@@ -1006,8 +1007,33 @@ const Payment: React.FC = () => {
                   </Elements>
                 )}
               </div>
-            )}
+            )} */}
 
+            {currentStep === 3 && !isCustom && (
+              <div className="space-y-4">
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Pay directly from your bank
+                </h2>
+                <p className="text-sm text-slate-600">
+                  Enter your bank account details. We do not store this information.
+                </p>
+
+                {pkMissing ? (
+                  <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm rounded-lg px-3 py-2">
+                    <code>NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY</code> is not configured.
+                  </div>
+                ) : (
+                  <Elements stripe={stripePromise}>
+                    <BankAccountPaymentForm
+                      paymentData={paymentData}
+                      onSuccess={handlePaymentSuccess}
+                      onError={handlePaymentError}
+                      onBack={() => setCurrentStep(2)}
+                    />
+                  </Elements>
+                )}
+              </div>
+            )}
             {/* Step 4: confirmation */}
             {currentStep === 4 && (
               <div className="space-y-5 text-center">
