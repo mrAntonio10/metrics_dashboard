@@ -201,9 +201,11 @@ export default function HomePageClient({
   const [deploying, setDeploying] = useState<string | null>(null);
 
   /** Estado para agreements info */
-  const [agreementsData, setAgreementsData] = useState<TenantAgreements[]>([]);
-  const [showAgreementsModal, setShowAgreementsModal] = useState(false);
+  const [selectedTenantForAgreements, setSelectedTenantForAgreements] = useState<string | null>(null);
+  const [agreementsData, setAgreementsData] = useState<TenantAgreements | null>(null);
   const [loadingAgreements, setLoadingAgreements] = useState(false);
+  const [agreementsPage, setAgreementsPage] = useState(1);
+  const [agreementsPageSize, setAgreementsPageSize] = useState(10);
 
   // 🔍 Texto de búsqueda para CLIENTS
   const [clientSearch, setClientSearch] = useState(
@@ -341,18 +343,19 @@ export default function HomePageClient({
     [refreshStatuses],
   );
 
-  /** Fetch agreements info for all tenants */
-  const handleShowAgreements = useCallback(async () => {
+  /** Fetch agreements info for a specific tenant */
+  const handleShowAgreements = useCallback(async (tenantId: string) => {
     try {
       setLoadingAgreements(true);
-      const res = await fetch(TENANT_AGREEMENTS_API, { cache: 'no-store' });
+      setSelectedTenantForAgreements(tenantId);
+      setAgreementsPage(1); // Reset to first page
+      const res = await fetch(`${TENANT_AGREEMENTS_API}?tenantId=${encodeURIComponent(tenantId)}`, { cache: 'no-store' });
       if (!res.ok) {
         console.error('Failed to fetch agreements');
         return;
       }
       const data = await res.json();
-      setAgreementsData(data.items || []);
-      setShowAgreementsModal(true);
+      setAgreementsData(data.item || null);
     } catch (e) {
       console.error('Failed to load agreements', e);
     } finally {
@@ -364,17 +367,6 @@ export default function HomePageClient({
     <ProtectedComponent permissionKey="page:home" fallback={<AccessDeniedFallback />}>
       <PageHeader title="Executive Summary" description="De-identified ops metrics (direct DB).">
         <div className="flex flex-wrap items-center gap-2">
-          {/* Show Agreements Info Button */}
-          <Button
-            onClick={handleShowAgreements}
-            disabled={loadingAgreements}
-            variant="outline"
-            size="sm"
-            className="gap-2"
-          >
-            <FileText className="h-4 w-4" />
-            {loadingAgreements ? 'Loading...' : 'Show Agreements Info'}
-          </Button>
           {/* 🔍 INPUT TEXT SEARCH */}
           <div ref={clientBoxRef} className="relative w-[260px]">
             <Input
@@ -553,6 +545,18 @@ export default function HomePageClient({
                       {amplifyInfo.label}
                     </a>
                   )}
+
+                  {/* Botón para ver agreements del tenant */}
+                  <button
+                    onClick={() => handleShowAgreements(t.tenantId)}
+                    disabled={loadingAgreements && selectedTenantForAgreements === t.tenantId}
+                    className="mt-2 inline-flex items-center gap-1 text-xs px-3 py-1 rounded-md bg-indigo-600 text-white w-fit hover:bg-indigo-700 disabled:opacity-60"
+                  >
+                    <FileText className="h-3 w-3" aria-hidden="true" />
+                    {loadingAgreements && selectedTenantForAgreements === t.tenantId
+                      ? 'Loading...'
+                      : 'Show Agreements'}
+                  </button>
                 </CardContent>
               </Card>
             );
@@ -584,76 +588,133 @@ export default function HomePageClient({
       </div>
 
       {/* Agreements Modal */}
-      {showAgreementsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowAgreementsModal(false)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      {agreementsData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => {
+            setAgreementsData(null);
+            setSelectedTenantForAgreements(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[80vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-4 border-b flex justify-between items-center">
-              <h2 className="text-xl font-bold">User Agreement Acceptances</h2>
+              <h2 className="text-xl font-bold">
+                User Agreement Acceptances - {agreementsData.tenantName}
+                {agreementsData.error && (
+                  <span className="ml-2 text-sm text-red-600">({agreementsData.error})</span>
+                )}
+              </h2>
               <button
-                onClick={() => setShowAgreementsModal(false)}
+                onClick={() => {
+                  setAgreementsData(null);
+                  setSelectedTenantForAgreements(null);
+                }}
                 className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
               >
                 ×
               </button>
             </div>
             <div className="p-4 overflow-y-auto max-h-[calc(80vh-80px)]">
-              {agreementsData.length === 0 ? (
-                <p className="text-center text-gray-500">No agreements data available.</p>
+              {agreementsData.agreements.length === 0 ? (
+                <p className="text-center text-gray-500">No agreements found for this tenant.</p>
               ) : (
-                <div className="space-y-6">
-                  {agreementsData.map((tenant) => (
-                    <div key={tenant.tenantId} className="border rounded-lg p-4">
-                      <h3 className="text-lg font-semibold mb-3">
-                        {tenant.tenantName}
-                        {tenant.error && (
-                          <span className="ml-2 text-sm text-red-600">({tenant.error})</span>
-                        )}
-                      </h3>
-                      {tenant.agreements.length === 0 ? (
-                        <p className="text-sm text-gray-500">No agreements found for this tenant.</p>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-sm">
-                            <thead className="bg-gray-100">
-                              <tr>
-                                <th className="px-3 py-2 text-left">ID</th>
-                                <th className="px-3 py-2 text-left">User</th>
-                                <th className="px-3 py-2 text-left">Agreement ID</th>
-                                <th className="px-3 py-2 text-left">Accepted At</th>
-                                <th className="px-3 py-2 text-left">Method</th>
-                                <th className="px-3 py-2 text-left">IP Address</th>
-                                <th className="px-3 py-2 text-left">Current</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {tenant.agreements.map((agreement) => (
-                                <tr key={agreement.id} className="border-t hover:bg-gray-50">
-                                  <td className="px-3 py-2">{agreement.id}</td>
-                                  <td className="px-3 py-2">{agreement.userFullName}</td>
-                                  <td className="px-3 py-2">{agreement.agreementId}</td>
-                                  <td className="px-3 py-2">
-                                    {agreement.acceptedAt
-                                      ? new Date(agreement.acceptedAt).toLocaleString()
-                                      : 'N/A'}
-                                  </td>
-                                  <td className="px-3 py-2">{agreement.acceptanceMethod || 'N/A'}</td>
-                                  <td className="px-3 py-2">{agreement.ipAddress || 'N/A'}</td>
-                                  <td className="px-3 py-2">
-                                    {agreement.isCurrent ? (
-                                      <span className="text-green-600">✓</span>
-                                    ) : (
-                                      <span className="text-gray-400">-</span>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
+                <>
+                  {/* Pagination Controls */}
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">Items per page:</span>
+                      <select
+                        value={agreementsPageSize}
+                        onChange={(e) => {
+                          setAgreementsPageSize(Number(e.target.value));
+                          setAgreementsPage(1);
+                        }}
+                        className="border rounded px-2 py-1 text-sm"
+                      >
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                        <option value={15}>15</option>
+                        <option value={30}>30</option>
+                      </select>
                     </div>
-                  ))}
-                </div>
+                    <div className="text-sm text-gray-600">
+                      Total: {agreementsData.agreements.length} agreements
+                    </div>
+                  </div>
+
+                  {/* Table */}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="px-3 py-2 text-left">ID</th>
+                          <th className="px-3 py-2 text-left">User</th>
+                          <th className="px-3 py-2 text-left">Agreement ID</th>
+                          <th className="px-3 py-2 text-left">Accepted At</th>
+                          <th className="px-3 py-2 text-left">Method</th>
+                          <th className="px-3 py-2 text-left">IP Address</th>
+                          <th className="px-3 py-2 text-left">Current</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {agreementsData.agreements
+                          .slice(
+                            (agreementsPage - 1) * agreementsPageSize,
+                            agreementsPage * agreementsPageSize,
+                          )
+                          .map((agreement) => (
+                            <tr key={agreement.id} className="border-t hover:bg-gray-50">
+                              <td className="px-3 py-2">{agreement.id}</td>
+                              <td className="px-3 py-2">{agreement.userFullName}</td>
+                              <td className="px-3 py-2">{agreement.agreementId}</td>
+                              <td className="px-3 py-2">
+                                {agreement.acceptedAt
+                                  ? new Date(agreement.acceptedAt).toLocaleString()
+                                  : 'N/A'}
+                              </td>
+                              <td className="px-3 py-2">{agreement.acceptanceMethod || 'N/A'}</td>
+                              <td className="px-3 py-2">{agreement.ipAddress || 'N/A'}</td>
+                              <td className="px-3 py-2">
+                                {agreement.isCurrent ? (
+                                  <span className="text-green-600">✓</span>
+                                ) : (
+                                  <span className="text-gray-400">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination Navigation */}
+                  <div className="mt-4 flex items-center justify-between">
+                    <button
+                      onClick={() => setAgreementsPage((p) => Math.max(1, p - 1))}
+                      disabled={agreementsPage === 1}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm text-gray-600">
+                      Page {agreementsPage} of{' '}
+                      {Math.ceil(agreementsData.agreements.length / agreementsPageSize)}
+                    </span>
+                    <button
+                      onClick={() => setAgreementsPage((p) => p + 1)}
+                      disabled={
+                        agreementsPage >=
+                        Math.ceil(agreementsData.agreements.length / agreementsPageSize)
+                      }
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>
