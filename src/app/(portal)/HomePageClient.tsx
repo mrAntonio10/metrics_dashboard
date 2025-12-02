@@ -18,7 +18,7 @@ import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
-import { getAmplifyUrlForTenant } from '../../lib/tenantAmplifyWhiteList';
+import { getAmplifyInfoForTenant } from '../../lib/tenantAmplifyWhiteList';
 
 export type Org = { id: string; name: string };
 
