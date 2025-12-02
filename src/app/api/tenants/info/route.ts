@@ -4,20 +4,33 @@ import { loadTenants } from '@/lib/tenants';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// 👇 Ajusta esto al dominio REAL de tu frontend si quieres ser más estricto
+// por ejemplo: 'https://app.itsvivace.com'
+const ALLOWED_ORIGIN = '*';
+
+const corsHeaders = {
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+    'Access-Control-Allow-Methods': 'GET,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+export async function OPTIONS() {
+    // Respuesta al preflight CORS
+    return NextResponse.json({}, { headers: corsHeaders });
+}
+
 export async function GET(req: NextRequest) {
     try {
         const tenants = await loadTenants();
 
         const tenantKey = req.nextUrl.searchParams.get('tenantId')?.trim();
 
-        // Si viene tenantId por queryParam, devolvemos solo ese tenant
         if (tenantKey) {
             const keyLower = tenantKey.toLowerCase();
 
             const tenant = tenants.find((t) => {
                 const idLower = (t.id || '').toLowerCase();
                 const nameLower = (t.name || '').toLowerCase();
-                // 👉 match por ID (.env.stock1 => "stock1") o por APP_NAME/REAL_NAME ("Its V2 Vivace Test")
                 return idLower === keyLower || nameLower === keyLower;
             });
 
@@ -26,14 +39,11 @@ export async function GET(req: NextRequest) {
                     {
                         error: 'tenant_not_found',
                         tenantKey,
-                        // opcional: datos para debug si quieres ver qué cargó del server
-                        availableTenants: tenants.map((t) => ({
-                            id: t.id,
-                            name: t.name,
-                            status: t.management.status,
-                        })),
                     },
-                    { status: 404 },
+                    {
+                        status: 404,
+                        headers: corsHeaders,
+                    },
                 );
             }
 
@@ -44,10 +54,9 @@ export async function GET(req: NextRequest) {
                 expirationDate: tenant.management.date,
             };
 
-            return NextResponse.json({ item });
+            return NextResponse.json({ item }, { headers: corsHeaders });
         }
 
-        // Sin tenantId: devolver todos los tenants
         const items = tenants.map((t) => ({
             tenantId: t.id,
             tenantName: t.name,
@@ -55,11 +64,14 @@ export async function GET(req: NextRequest) {
             expirationDate: t.management.date,
         }));
 
-        return NextResponse.json({ items });
+        return NextResponse.json({ items }, { headers: corsHeaders });
     } catch (e: any) {
         return NextResponse.json(
             { error: e?.message || 'failed_to_load_tenants' },
-            { status: 500 },
+            {
+                status: 500,
+                headers: corsHeaders,
+            },
         );
     }
 }
