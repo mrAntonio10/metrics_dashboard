@@ -11,7 +11,7 @@ import {
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
-import { CreditCard, Users, AlertTriangle, CalendarClock, ExternalLink, FileText } from 'lucide-react';
+import { CreditCard, Users, AlertTriangle, CalendarClock, ExternalLink, FileText, UserX } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
@@ -21,6 +21,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { getAmplifyInfoForTenant } from '../../lib/tenantAmplifyWhiteList';
 import type { TenantAgreements } from '@/lib/tenantAgreements';
+import type { TenantGhostUsers } from '@/lib/tenantGhostUsers';
 
 export type Org = { id: string; name: string };
 
@@ -181,6 +182,7 @@ const TENANT_STATUS_API = '/api/tenants/status';
 const TENANT_UPDATE_API = '/api/tenants/update';
 const TENANT_DEPLOY_API = '/api/tenants/deploy';
 const TENANT_AGREEMENTS_API = '/api/tenants/agreements';
+const TENANT_GHOST_USERS_API = '/api/tenants/ghost-users';
 
 export default function HomePageClient({
   orgs,
@@ -206,6 +208,13 @@ export default function HomePageClient({
   const [loadingAgreements, setLoadingAgreements] = useState(false);
   const [agreementsPage, setAgreementsPage] = useState(1);
   const [agreementsPageSize, setAgreementsPageSize] = useState(10);
+
+  /** Estado para ghost users info */
+  const [selectedTenantForGhostUsers, setSelectedTenantForGhostUsers] = useState<string | null>(null);
+  const [ghostUsersData, setGhostUsersData] = useState<TenantGhostUsers | null>(null);
+  const [loadingGhostUsers, setLoadingGhostUsers] = useState(false);
+  const [ghostUsersPage, setGhostUsersPage] = useState(1);
+  const [ghostUsersPageSize, setGhostUsersPageSize] = useState(10);
 
   // 🔍 Texto de búsqueda para CLIENTS
   const [clientSearch, setClientSearch] = useState(
@@ -360,6 +369,26 @@ export default function HomePageClient({
       console.error('Failed to load agreements', e);
     } finally {
       setLoadingAgreements(false);
+    }
+  }, []);
+
+  /** Fetch ghost users info for a specific tenant */
+  const handleShowGhostUsers = useCallback(async (tenantId: string) => {
+    try {
+      setLoadingGhostUsers(true);
+      setSelectedTenantForGhostUsers(tenantId);
+      setGhostUsersPage(1); // Reset to first page
+      const res = await fetch(`${TENANT_GHOST_USERS_API}?tenantId=${encodeURIComponent(tenantId)}`, { cache: 'no-store' });
+      if (!res.ok) {
+        console.error('Failed to fetch ghost users');
+        return;
+      }
+      const data = await res.json();
+      setGhostUsersData(data.item || null);
+    } catch (e) {
+      console.error('Failed to load ghost users', e);
+    } finally {
+      setLoadingGhostUsers(false);
     }
   }, []);
 
@@ -557,6 +586,18 @@ export default function HomePageClient({
                       ? 'Loading...'
                       : 'Show Agreements'}
                   </button>
+
+                  {/* Botón para ver ghost users del tenant */}
+                  <button
+                    onClick={() => handleShowGhostUsers(t.tenantId)}
+                    disabled={loadingGhostUsers && selectedTenantForGhostUsers === t.tenantId}
+                    className="mt-2 inline-flex items-center gap-1 text-xs px-3 py-1 rounded-md bg-amber-600 text-white w-fit hover:bg-amber-700 disabled:opacity-60"
+                  >
+                    <UserX className="h-3 w-3" aria-hidden="true" />
+                    {loadingGhostUsers && selectedTenantForGhostUsers === t.tenantId
+                      ? 'Loading...'
+                      : 'Show Ghost Users'}
+                  </button>
                 </CardContent>
               </Card>
             );
@@ -708,6 +749,131 @@ export default function HomePageClient({
                       disabled={
                         agreementsPage >=
                         Math.ceil(agreementsData.agreements.length / agreementsPageSize)
+                      }
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ghost Users Modal */}
+      {ghostUsersData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => {
+            setGhostUsersData(null);
+            setSelectedTenantForGhostUsers(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[80vh] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b flex justify-between items-center bg-amber-50">
+              <h2 className="text-xl font-bold text-amber-900">
+                👻 Ghost Users - {ghostUsersData.tenantName}
+                {ghostUsersData.error && (
+                  <span className="ml-2 text-sm text-red-600">({ghostUsersData.error})</span>
+                )}
+              </h2>
+              <button
+                onClick={() => {
+                  setGhostUsersData(null);
+                  setSelectedTenantForGhostUsers(null);
+                }}
+                className="text-gray-500 hover:text-gray-700 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[calc(80vh-80px)]">
+              {/* Warning Alert */}
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md">
+                <p className="text-sm text-amber-800">
+                  <strong>⚠️ Ghost Users:</strong> These users have login credentials (password_changed=1) but are NOT registered in the providers table. They can access the system but are invisible in normal user management.
+                </p>
+              </div>
+
+              {ghostUsersData.ghostUsers.length === 0 ? (
+                <p className="text-center text-green-600 font-semibold">✅ No ghost users found! All users are properly registered.</p>
+              ) : (
+                <>
+                  {/* Pagination Controls */}
+                  <div className="mb-4 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-gray-600">Items per page:</span>
+                      <select
+                        value={ghostUsersPageSize}
+                        onChange={(e) => {
+                          setGhostUsersPageSize(Number(e.target.value));
+                          setGhostUsersPage(1);
+                        }}
+                        className="border rounded px-2 py-1 text-sm"
+                      >
+                        <option value={5}>5</option>
+                        <option value={10}>10</option>
+                        <option value={15}>15</option>
+                        <option value={30}>30</option>
+                      </select>
+                    </div>
+                    <div className="text-sm text-amber-700 font-semibold">
+                      ⚠️ Total: {ghostUsersData.ghostUsers.length} ghost users
+                    </div>
+                  </div>
+
+                  {/* Table */}
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-amber-100">
+                        <tr>
+                          <th className="px-3 py-2 text-left">ID</th>
+                          <th className="px-3 py-2 text-left">Name</th>
+                          <th className="px-3 py-2 text-left">Last Name</th>
+                          <th className="px-3 py-2 text-left">Email</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ghostUsersData.ghostUsers
+                          .slice(
+                            (ghostUsersPage - 1) * ghostUsersPageSize,
+                            ghostUsersPage * ghostUsersPageSize,
+                          )
+                          .map((user) => (
+                            <tr key={user.id} className="border-t hover:bg-amber-50">
+                              <td className="px-3 py-2">{user.id}</td>
+                              <td className="px-3 py-2">{user.name || 'N/A'}</td>
+                              <td className="px-3 py-2">{user.lastname || 'N/A'}</td>
+                              <td className="px-3 py-2">{user.email}</td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination Navigation */}
+                  <div className="mt-4 flex items-center justify-between">
+                    <button
+                      onClick={() => setGhostUsersPage((p) => Math.max(1, p - 1))}
+                      disabled={ghostUsersPage === 1}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm text-gray-600">
+                      Page {ghostUsersPage} of{' '}
+                      {Math.ceil(ghostUsersData.ghostUsers.length / ghostUsersPageSize)}
+                    </span>
+                    <button
+                      onClick={() => setGhostUsersPage((p) => p + 1)}
+                      disabled={
+                        ghostUsersPage >=
+                        Math.ceil(ghostUsersData.ghostUsers.length / ghostUsersPageSize)
                       }
                       className="px-3 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
