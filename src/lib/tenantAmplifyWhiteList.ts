@@ -8,7 +8,7 @@ export type TenantAmplifyEntry = {
 
 const TENANT_AMPLIFY_WHITELIST: TenantAmplifyEntry[] = [
     {
-        id: 'poweroftherapy',
+        id: 'potherapy',
         label: 'Open PowerOfTherapy',
         url: 'https://thepoweroftherapy-uqminds-com.d6o53m8qi0iet.amplifyapp.com/',
     },
@@ -18,7 +18,7 @@ const TENANT_AMPLIFY_WHITELIST: TenantAmplifyEntry[] = [
         url: 'https://test-uqminds-com.dnuzin6r91h2f.amplifyapp.com/login',
     },
     {
-        id: 'itsvivace',
+        id: 'client1',
         label: "Open Dianel (It's Vivace)",
         url: 'https://itsvivace-uqminds-com.d3707lwxt85vhg.amplifyapp.com/',
     },
