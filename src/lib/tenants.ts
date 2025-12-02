@@ -116,9 +116,9 @@ export async function getTenantCounts(t: TenantConfig): Promise<TenantCounts> {
         `SELECT type, COUNT(*) AS c FROM \`${t.tables.providers}\` GROUP BY type`,
       )
       const map = new Map<string, number>()
-      ;(rows as any[]).forEach((r) =>
-        map.set(String(r.type).toLowerCase(), Number(r.c)),
-      )
+        ; (rows as any[]).forEach((r) =>
+          map.set(String(r.type).toLowerCase(), Number(r.c)),
+        )
       admins = map.get('admin') || 0
       providers = map.get('provider') || 0
     } catch {
@@ -148,6 +148,6 @@ export async function getTenantCounts(t: TenantConfig): Promise<TenantCounts> {
   } finally {
     try {
       await conn?.end()
-    } catch {}
+    } catch { }
   }
 }
