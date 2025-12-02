@@ -453,7 +453,8 @@ export default function HomePageClient({
             const docker = statuses[t.tenantId];
             const { label: dockerLabel, className: dockerClass, isRunning } = getDockerUiState(docker);
 
-            const amplifyInfo = getAmplifyInfoForTenant(t.tenantId);
+            const amplifyInfo = getAmplifyInfoForTenant(t.tenantId, t.tenantName);
+
 
             return (
               <Card key={t.tenantId} className={cardTone}>
