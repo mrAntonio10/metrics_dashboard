@@ -1,18 +1,27 @@
 'use client';
 
-import { useMemo, useTransition, useEffect, useState, useRef } from 'react';
+import {
+  useMemo,
+  useTransition,
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+} from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PageHeader } from '@/components/page-header';
 import { KpiCard } from '@/components/kpi-card';
-import { CreditCard, Users, AlertTriangle, CalendarClock } from 'lucide-react';
+import { CreditCard, Users, AlertTriangle, CalendarClock, ExternalLink } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import { ProtectedComponent, AccessDeniedFallback } from '@/hooks/use-permission';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
+import { getAmplifyInfoForTenant } from '@/lib/tenantAmplifyWhitelist';
 
 export type Org = { id: string; name: string };
+
 export type CountRow = {
   tenantId: string;
   tenantName: string;
@@ -40,7 +49,7 @@ type TenantStatus = {
   containers: TenantContainerStatus[];
 };
 
-/** Utilities */
+/** Utilities de fechas */
 function parseLocalDateFromYMD(ymd?: string | null): Date | null {
   if (!ymd) return null;
   const d = new Date(`${ymd}T00:00:00`);
@@ -62,6 +71,113 @@ function formatLocal(d: Date | null): string | undefined {
     return undefined;
   }
 }
+
+/** Helpers para UI de cada tenant card */
+type CardTone =
+  | 'bg-yellow-50 border-yellow-200 text-yellow-700'
+  | 'bg-red-50 border-red-200 text-red-700'
+  | 'bg-green-50 border-green-200 text-green-700'
+  | 'bg-blue-50 border-blue-200 text-blue-700';
+
+type CtaInfo = {
+  label: string;
+  nextStatus: ManagementStatus;
+};
+
+function getCardTone(
+  sinceDate: Date | null,
+  isExpired: boolean,
+  status: ManagementStatus,
+): CardTone {
+  if (!sinceDate) return 'bg-yellow-50 border-yellow-200 text-yellow-700';
+  if (isExpired) return 'bg-red-50 border-red-200 text-red-700';
+  if (status === 'SUBSCRIBED') {
+    return 'bg-green-50 border-green-200 text-green-700';
+  }
+  return 'bg-blue-50 border-blue-200 text-blue-700';
+}
+
+function getStatusText(
+  sinceDate: Date | null,
+  renewalDate: Date | null,
+  isExpired: boolean,
+  status: ManagementStatus,
+): string {
+  if (!sinceDate) return '🆕 NEW CLIENT';
+
+  if (isExpired && status === 'SUBSCRIBED') {
+    return '⚠️ SUBSCRIPTION EXPIRED (renew now)';
+  }
+  if (isExpired) {
+    return '⚠️ TRIAL EXPIRED';
+  }
+  if (status === 'SUBSCRIBED') {
+    return `✅ SUBSCRIBED (renew by ${formatLocal(renewalDate) ?? 'N/A'})`;
+  }
+  return `⏳ TRIAL (until ${formatLocal(renewalDate) ?? 'N/A'})`;
+}
+
+function getCtaInfo(
+  sinceDate: Date | null,
+  isExpired: boolean,
+  status: ManagementStatus,
+): CtaInfo | null {
+  // 1) Nunca configurado -> cliente nuevo
+  if (!sinceDate) {
+    return { label: 'Start Trial', nextStatus: 'TRIAL' };
+  }
+
+  // 2) Expirado (trial o sub)
+  if (isExpired) {
+    if (status === 'SUBSCRIBED') {
+      return { label: 'Renew', nextStatus: 'SUBSCRIBED' };
+    }
+    return { label: 'Activate Subscription', nextStatus: 'SUBSCRIBED' };
+  }
+
+  // 3) Activo (no expirado)
+  if (status === 'SUBSCRIBED') {
+    return { label: 'Renew', nextStatus: 'SUBSCRIBED' };
+  }
+  return { label: 'Activate Subscription', nextStatus: 'SUBSCRIBED' };
+}
+
+function getDockerUiState(docker?: TenantStatus) {
+  if (!docker) {
+    return {
+      label: 'Unknown',
+      className: 'bg-slate-100 text-slate-600',
+      isRunning: false,
+    };
+  }
+
+  if (docker.overall === 'up') {
+    return {
+      label: 'Running',
+      className: 'bg-emerald-50 text-emerald-700',
+      isRunning: true,
+    };
+  }
+
+  if (docker.overall === 'down') {
+    return {
+      label: 'Stopped / Partial',
+      className: 'bg-rose-50 text-rose-700',
+      isRunning: false,
+    };
+  }
+
+  return {
+    label: 'Not deployed',
+    className: 'bg-slate-100 text-slate-600',
+    isRunning: false,
+  };
+}
+
+/** APIs internas */
+const TENANT_STATUS_API = '/api/tenants/status';
+const TENANT_UPDATE_API = '/api/tenants/update';
+const TENANT_DEPLOY_API = '/api/tenants/deploy';
 
 export default function HomePageClient({
   orgs,
@@ -92,6 +208,7 @@ export default function HomePageClient({
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const clientBoxRef = useRef<HTMLDivElement | null>(null);
 
+  /** Sincronizar input con selectedClient */
   useEffect(() => {
     if (selectedClient === 'all') {
       setClientSearch('');
@@ -101,7 +218,7 @@ export default function HomePageClient({
     }
   }, [selectedClient, orgs]);
 
-  // Cerrar dropdown al hacer click fuera
+  /** Cerrar dropdown al hacer click fuera */
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (clientBoxRef.current && !clientBoxRef.current.contains(event.target as Node)) {
@@ -113,27 +230,35 @@ export default function HomePageClient({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleSelectClient = (val: string) => {
-    startTransition(() => {
-      const params = new URLSearchParams(search.toString());
-      if (!val || val === 'all') params.delete('client');
-      else params.set('client', val);
-      router.replace(`${pathname}?${params.toString()}`);
-    });
-  };
+  const handleSelectClient = useCallback(
+    (val: string) => {
+      startTransition(() => {
+        const params = new URLSearchParams(search.toString());
+        if (!val || val === 'all') params.delete('client');
+        else params.set('client', val);
+        router.replace(`${pathname}?${params.toString()}`);
+      });
+    },
+    [pathname, router, search],
+  );
 
-  // Lista de orgs filtrados por el texto ingresado
+  /** Orgs filtrados por el texto de búsqueda */
   const filteredOrgsBySearch = useMemo(() => {
     if (!clientSearch.trim()) return orgs;
     const q = clientSearch.toLowerCase();
     return orgs.filter((o) => o.name.toLowerCase().includes(q));
   }, [orgs, clientSearch]);
 
+  /** Tenants filtrados por selectedClient */
   const filtered = useMemo(
-    () => (selectedClient === 'all' ? counts : counts.filter((c) => c.tenantId === selectedClient)),
+    () =>
+      selectedClient === 'all'
+        ? counts
+        : counts.filter((c) => c.tenantId === selectedClient),
     [counts, selectedClient],
   );
 
+  /** KPIs globales */
   const totalUsers = filtered.reduce((a, b) => a + b.users, 0);
   const totalClients = filtered.reduce((a, b) => a + b.clients, 0);
   const totalAdmins = filtered.reduce((a, b) => a + b.admins, 0);
@@ -150,27 +275,9 @@ export default function HomePageClient({
   const errored = filtered.filter((r) => r.error);
 
   /** Cargar estado docker una vez al montar */
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch('/api/tenants/status', { cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json();
-        const map: Record<string, TenantStatus> = {};
-        for (const item of data.items || []) {
-          map[item.tenantId] = item as TenantStatus;
-        }
-        setStatuses(map);
-      } catch (e) {
-        console.error('Failed to load tenant statuses', e);
-      }
-    };
-    load();
-  }, []);
-
-  const refreshStatuses = async () => {
+  const loadStatuses = useCallback(async () => {
     try {
-      const res = await fetch('/api/tenants/status', { cache: 'no-store' });
+      const res = await fetch(TENANT_STATUS_API, { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       const map: Record<string, TenantStatus> = {};
@@ -179,44 +286,58 @@ export default function HomePageClient({
       }
       setStatuses(map);
     } catch (e) {
-      console.error('Failed to refresh tenant statuses', e);
+      console.error('Failed to load tenant statuses', e);
     }
-  };
+  }, []);
 
-  /** Cambiar status de trial/subscription (ya lo tenías) */
-  async function handleStatusChange(tenantId: string, newStatus: ManagementStatus) {
-    await fetch('/api/tenants/update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenantId, status: newStatus }),
-    });
-    startTransition(() => router.refresh());
-  }
+  useEffect(() => {
+    loadStatuses();
+  }, [loadStatuses]);
 
-  /** Disparar deploy via n8n (API interna) */
-  const handleDeployTenant = async (tenantId: string) => {
-    try {
-      setDeploying(tenantId);
-      const res = await fetch('/api/tenants/deploy', {
+  const refreshStatuses = useCallback(async () => {
+    await loadStatuses();
+  }, [loadStatuses]);
+
+  /** Cambiar status de trial/subscription */
+  const handleStatusChange = useCallback(
+    async (tenantId: string, newStatus: ManagementStatus) => {
+      await fetch(TENANT_UPDATE_API, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId }),
+        body: JSON.stringify({ tenantId, status: newStatus }),
       });
-      const json = await res.json().catch(() => ({}));
-      console.log('Deploy response', json);
-      await refreshStatuses();
-    } catch (e) {
-      console.error('Failed to trigger deploy', e);
-    } finally {
-      setDeploying(null);
-    }
-  };
+      startTransition(() => router.refresh());
+    },
+    [router],
+  );
+
+  /** Disparar deploy via n8n (API interna) */
+  const handleDeployTenant = useCallback(
+    async (tenantId: string) => {
+      try {
+        setDeploying(tenantId);
+        const res = await fetch(TENANT_DEPLOY_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenantId }),
+        });
+        const json = await res.json().catch(() => ({}));
+        console.log('Deploy response', json);
+        await refreshStatuses();
+      } catch (e) {
+        console.error('Failed to trigger deploy', e);
+      } finally {
+        setDeploying(null);
+      }
+    },
+    [refreshStatuses],
+  );
 
   return (
     <ProtectedComponent permissionKey="page:home" fallback={<AccessDeniedFallback />}>
       <PageHeader title="Executive Summary" description="De-identified ops metrics (direct DB).">
         <div className="flex flex-wrap items-center gap-2">
-          {/* 🔍 INPUT TEXT SEARCH en vez de Select */}
+          {/* 🔍 INPUT TEXT SEARCH */}
           <div ref={clientBoxRef} className="relative w-[260px]">
             <Input
               aria-busy={isPending}
@@ -323,83 +444,16 @@ export default function HomePageClient({
             const sinceDate = parseLocalDateFromYMD(t.management?.date || null);
             const renewalDate = addOneMonth(sinceDate);
             const now = Date.now();
-
-            // La FECHA manda: si hay renewalDate y ya pasó -> expirado SIEMPRE
             const isExpired = !!renewalDate && now >= renewalDate.getTime();
 
-            let ctaLabel = '';
-            let ctaNextStatus: ManagementStatus | undefined;
-
-            // 1) Nunca se ha configurado nada -> cliente nuevo
-            if (!sinceDate) {
-              ctaLabel = 'Start Trial';
-              ctaNextStatus = 'TRIAL';
-            }
-            // 2) Expirado: da igual si antes era TRIAL o SUBSCRIBED
-            else if (isExpired) {
-              if (status === 'SUBSCRIBED') {
-                // Suscripción vencida
-                ctaLabel = 'Renew';
-                ctaNextStatus = 'SUBSCRIBED';
-              } else {
-                // Trial vencido o sin status claro
-                ctaLabel = 'Activate Subscription';
-                ctaNextStatus = 'SUBSCRIBED';
-              }
-            }
-            // 3) Activo (no expirado todavía)
-            else {
-              if (status === 'SUBSCRIBED') {
-                // Suscripción al día: permitimos renovar anticipado si quieres
-                ctaLabel = 'Renew';
-                ctaNextStatus = 'SUBSCRIBED';
-              } else {
-                // Dentro de ventana de trial
-                ctaLabel = 'Activate Subscription';
-                ctaNextStatus = 'SUBSCRIBED';
-              }
-            }
-
-            // Colores del card basados en fecha
-            const cardTone =
-              !sinceDate
-                ? 'bg-yellow-50 border-yellow-200 text-yellow-700' // nuevo
-                : isExpired
-                  ? 'bg-red-50 border-red-200 text-red-700' // vencido (trial o sub)
-                  : status === 'SUBSCRIBED'
-                    ? 'bg-green-50 border-green-200 text-green-700' // sub activa
-                    : 'bg-blue-50 border-blue-200 text-blue-700'; // trial activo
-
-            // Texto de estado
-            const statusText =
-              !sinceDate
-                ? '🆕 NEW CLIENT'
-                : isExpired && status === 'SUBSCRIBED'
-                  ? '⚠️ SUBSCRIPTION EXPIRED (renew now)'
-                  : isExpired
-                    ? '⚠️ TRIAL EXPIRED'
-                    : status === 'SUBSCRIBED'
-                      ? `✅ SUBSCRIBED (renew by ${formatLocal(renewalDate) ?? 'N/A'})`
-                      : `⏳ TRIAL (until ${formatLocal(renewalDate) ?? 'N/A'})`;
+            const cardTone = getCardTone(sinceDate, isExpired, status);
+            const statusText = getStatusText(sinceDate, renewalDate, isExpired, status);
+            const cta = getCtaInfo(sinceDate, isExpired, status);
 
             const docker = statuses[t.tenantId];
-            const isRunning = docker?.overall === 'up';
+            const { label: dockerLabel, className: dockerClass, isRunning } = getDockerUiState(docker);
 
-            let dockerLabel = 'Unknown';
-            let dockerClass = 'bg-slate-100 text-slate-600';
-
-            if (docker) {
-              if (docker.overall === 'up') {
-                dockerLabel = 'Running';
-                dockerClass = 'bg-emerald-50 text-emerald-700';
-              } else if (docker.overall === 'down') {
-                dockerLabel = 'Stopped / Partial';
-                dockerClass = 'bg-rose-50 text-rose-700';
-              } else {
-                dockerLabel = 'Not deployed';
-                dockerClass = 'bg-slate-100 text-slate-600';
-              }
-            }
+            const amplifyInfo = getAmplifyInfoForTenant(t.tenantId);
 
             return (
               <Card key={t.tenantId} className={cardTone}>
@@ -438,13 +492,27 @@ export default function HomePageClient({
                     )}
                   </div>
 
-                  {ctaLabel && ctaNextStatus && (
+                  {/* CTA de trial/subscription */}
+                  {cta && (
                     <button
-                      onClick={() => handleStatusChange(t.tenantId, ctaNextStatus)}
+                      onClick={() => handleStatusChange(t.tenantId, cta.nextStatus)}
                       className="mt-2 text-sm px-3 py-1 rounded-md bg-primary text-white w-fit hover:opacity-90"
                     >
-                      {ctaLabel}
+                      {cta.label}
                     </button>
+                  )}
+
+                  {/* Botón para abrir app de Amplify si está whitelisteado */}
+                  {amplifyInfo && (
+                    <a
+                      href={amplifyInfo.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-2 inline-flex items-center gap-1 text-xs px-3 py-1 rounded-md bg-slate-900 text-white w-fit hover:bg-slate-800"
+                    >
+                      <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      {amplifyInfo.label}
+                    </a>
                   )}
                 </CardContent>
               </Card>
