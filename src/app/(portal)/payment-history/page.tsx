@@ -1,6 +1,6 @@
 // app/payment/history/page.tsx
 import React from 'react';
-import PaidChargesTable from '@/components/Payment/PaidChargesTable';
+import PaymentHistoryTabs from '@/components/Payment/PaymentHistoryTabs';
 import { AccessDeniedFallback, ProtectedComponent } from '@/hooks/use-permission';
 
 export default function PaymentHistoryPage() {
@@ -9,7 +9,7 @@ export default function PaymentHistoryPage() {
       permissionKey="page:payment-history"
       fallback={<AccessDeniedFallback />}
     >
-      <PaidChargesTable />
+      <PaymentHistoryTabs />
     </ProtectedComponent>
   );
 }

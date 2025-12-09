@@ -114,27 +114,7 @@ const PaidChargesTable: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/40 to-indigo-50">
-      <div className="max-w-6xl mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">
-              Paid Payments History
-            </h1>
-            <p className="text-sm text-slate-600">
-              List of all successful Stripe charges (status:{' '}
-              <span className="font-semibold text-emerald-600">succeeded</span>).
-            </p>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <CreditCard className="w-4 h-4 text-blue-600" />
-            <span>Data fetched securely from your backend API.</span>
-          </div>
-        </div>
-
-        {/* Card */}
-        <div className="bg-white rounded-2xl shadow-lg border border-slate-100 p-4 md:p-5 space-y-4">
+    <div className="space-y-4">
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2">
               {error}
@@ -296,8 +276,6 @@ const PaidChargesTable: React.FC = () => {
               <ArrowRight className="w-3 h-3" />
             </button>
           </div>
-        </div>
-      </div>
     </div>
   );
 };
