@@ -36,76 +36,81 @@ export async function GET(request: Request) {
       }
     }
 
-    // Buscar PaymentIntents con us_bank_account y estado succeeded
-    const searchResult = await stripe.paymentIntents.search({
-      query: "status:'succeeded' AND payment_method_types:'us_bank_account'",
-      limit,
+    // Buscar charges exitosos y filtrar por tipo de pago bancario
+    // Nota: Stripe Search no permite filtrar directamente por payment_method_details.type
+    // así que filtramos en el código después de obtener los resultados
+    const searchResult = await stripe.charges.search({
+      query: "status:'succeeded'",
+      limit: limit * 3, // Pedimos más porque filtraremos después
       ...(page ? { page } : {}),
     });
 
-    const items = await Promise.all(
-      searchResult.data.map(async (pi) => {
-        // Obtener detalles del payment method si existe
-        let bankDetails = null;
-        if (pi.payment_method) {
-          try {
-            const pm = await stripe.paymentMethods.retrieve(
-              pi.payment_method as string,
-            );
-            if (pm.type === 'us_bank_account' && pm.us_bank_account) {
-              bankDetails = {
-                bankName: pm.us_bank_account.bank_name || null,
-                accountHolderType: pm.us_bank_account.account_holder_type || null,
-                accountType: pm.us_bank_account.account_type || null,
-                last4: pm.us_bank_account.last4 || null,
-                routingNumber: pm.us_bank_account.routing_number || null,
-              };
-            }
-          } catch (err) {
-            console.error('Error fetching payment method:', err);
-          }
-        }
-
-        // Obtener información del charge asociado si existe
-        let chargeInfo = null;
-        if (pi.latest_charge) {
-          try {
-            const charge = await stripe.charges.retrieve(
-              pi.latest_charge as string,
-            );
-            chargeInfo = {
-              chargeId: charge.id,
-              receiptUrl: charge.receipt_url || null,
-              networkTransactionId:
-                charge.payment_method_details?.us_bank_account
-                  ?.network_transaction_id || null,
-            };
-          } catch (err) {
-            console.error('Error fetching charge:', err);
-          }
-        }
-
-        return {
-          id: pi.id,
-          object: pi.object,
-          amount: pi.amount / 100,
-          currency: pi.currency,
-          description: pi.description || '',
-          customerEmail: pi.receipt_email || '',
-          customerName: pi.metadata?.customer_name || '',
-          status: pi.status,
-          paymentMethodType: 'us_bank_account',
-          bankDetails,
-          chargeInfo,
-          created: pi.created,
-          metadata: pi.metadata,
-        };
-      }),
+    // Filtrar solo pagos con bank account
+    const bankCharges = searchResult.data.filter((ch) =>
+      ch.payment_method_details?.type === 'us_bank_account' ||
+      ch.payment_method_details?.type === 'ach_debit' ||
+      ch.payment_method_details?.type === 'ach_credit_transfer'
     );
+
+    // Limitar al tamaño de página solicitado
+    const paginatedCharges = bankCharges.slice(0, limit);
+
+    const items = paginatedCharges.map((ch) => {
+      const paymentMethodType = ch.payment_method_details?.type || 'unknown';
+
+      // Extraer detalles de bank account del charge
+      let bankDetails = null;
+      if (
+        paymentMethodType === 'us_bank_account' ||
+        paymentMethodType === 'ach_debit' ||
+        paymentMethodType === 'ach_credit_transfer'
+      ) {
+        const usBankAccount = (ch.payment_method_details as any).us_bank_account;
+        if (usBankAccount) {
+          bankDetails = {
+            bankName: usBankAccount.bank_name || null,
+            accountHolderType: usBankAccount.account_holder_type || null,
+            accountType: usBankAccount.account_type || null,
+            last4: usBankAccount.last4 || null,
+            routingNumber: usBankAccount.routing_number || null,
+          };
+        }
+      }
+
+      const networkTransactionId =
+        paymentMethodType === 'us_bank_account'
+          ? (ch.payment_method_details as any).us_bank_account?.network_transaction_id || null
+          : null;
+
+      const email =
+        ch.billing_details?.email ||
+        ch.receipt_email ||
+        '';
+
+      return {
+        id: ch.id,
+        object: ch.object,
+        amount: ch.amount / 100,
+        currency: ch.currency,
+        description: ch.description || '',
+        customerEmail: email,
+        customerName: ch.billing_details?.name || '',
+        status: ch.status,
+        paymentMethodType,
+        bankDetails,
+        chargeInfo: {
+          chargeId: ch.id,
+          receiptUrl: ch.receipt_url || null,
+          networkTransactionId,
+        },
+        created: ch.created,
+        metadata: ch.metadata,
+      };
+    });
 
     return NextResponse.json({
       items,
-      hasMore: searchResult.has_more,
+      hasMore: bankCharges.length > limit || searchResult.has_more,
       nextPage: searchResult.next_page || null,
     });
   } catch (error: any) {
