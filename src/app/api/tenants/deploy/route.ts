@@ -12,7 +12,7 @@ const exec = promisify(execFile);
 function containersForTenant(tenantId: string) {
   return [
     `vivace-app-${tenantId}`,
-    `vivace-webserver-${tenantId}`,
+    // `vivace-webserver-${tenantId}`, // Commented: webserver containers no longer exist
   ];
 }
 

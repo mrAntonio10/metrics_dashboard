@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 function containersForTenant(tenantId: string) {
   return [
     `vivace-app-${tenantId}`,
-    `vivace-webserver-${tenantId}`,
+    // `vivace-webserver-${tenantId}`, // Commented: webserver containers no longer exist
   ];
 }
 
