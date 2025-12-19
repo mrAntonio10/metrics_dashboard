@@ -31,10 +31,10 @@ docker run -d \
   -e METRICS_PATH=/var/lib/vivace-metrics/metrics.json \
   -e METRICS_HISTORY_DIR=/var/lib/vivace-metrics/history \
   -e METRICS_HISTORY_FILE=/var/lib/vivace-metrics/history.json \
-  -e TENANTS_DIR="/root/mr/vivace-api" \
+  -e TENANTS_DIR="/root/vivace-api" \
   -v /var/lib/vivace-metrics:/var/lib/vivace-metrics:rw \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /root/mr/vivace-api:/root/mr/vivace-api:rw \
+  -v /root/vivace-api:/root/vivace-api:rw \
   metrics-dashboard:latest
 
 echo "==> Limpiando imágenes colgantes..."

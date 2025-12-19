@@ -26,7 +26,7 @@ export type TenantCounts = {
   error?: string
 }
 
-const TENANTS_DIR = '/root/mr/vivace-api/' // path inside the container
+const TENANTS_DIR = '/root/vivace-api/' // path inside the container
 
 function parseDotEnv(content: string): Record<string, string> {
   const out: Record<string, string> = {}

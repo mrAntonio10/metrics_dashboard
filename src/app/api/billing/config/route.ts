@@ -2,7 +2,7 @@
 import fs from 'fs/promises'
 import path from 'path'
 
-const TENANTS_DIR = '/root/mr/vivace-api'
+const TENANTS_DIR = '/root/vivace-api'
 
 type BillingConfig = {
   tenantId: string
