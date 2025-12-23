@@ -54,8 +54,8 @@ sudo /usr/local/bin/generate-metrics.sh || echo "⚠️  Advertencia: No se pudi
 
 # Verificar si ya existe el cron job
 if ! crontab -l 2>/dev/null | grep -q "generate-metrics.sh"; then
-  echo "==> Configurando cron job para métricas (cada 5 minutos)..."
-  (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/local/bin/generate-metrics.sh >> /var/log/metrics-generator.log 2>&1") | crontab -
+  echo "==> Configurando cron job para métricas (diario a las 2:00 AM)..."
+  (crontab -l 2>/dev/null; echo "0 2 * * * /usr/local/bin/generate-metrics.sh >> /var/log/metrics-generator.log 2>&1") | crontab -
   echo "✅ Cron job configurado"
 else
   echo "✅ Cron job ya existe"
