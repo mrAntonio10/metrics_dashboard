@@ -40,5 +40,34 @@ docker run -d \
 echo "==> Limpiando imágenes colgantes..."
 docker image prune -f
 
+echo "==> Instalando generador de métricas..."
+# Copiar script al sistema (usar versión simple)
+sudo cp generate-metrics-simple.sh /usr/local/bin/generate-metrics.sh
+sudo chmod +x /usr/local/bin/generate-metrics.sh
+
+# Crear directorio de métricas si no existe
+sudo mkdir -p /var/lib/vivace-metrics/history
+
+# Ejecutar una vez para inicializar
+echo "==> Generando métricas iniciales..."
+sudo /usr/local/bin/generate-metrics.sh || echo "⚠️  Advertencia: No se pudieron generar métricas iniciales"
+
+# Verificar si ya existe el cron job
+if ! crontab -l 2>/dev/null | grep -q "generate-metrics.sh"; then
+  echo "==> Configurando cron job para métricas (cada 5 minutos)..."
+  (crontab -l 2>/dev/null; echo "*/5 * * * * /usr/local/bin/generate-metrics.sh >> /var/log/metrics-generator.log 2>&1") | crontab -
+  echo "✅ Cron job configurado"
+else
+  echo "✅ Cron job ya existe"
+fi
+
+echo ""
 echo "==> Despliegue completado correctamente ✅"
+echo ""
+echo "📊 Endpoints disponibles:"
+echo "   - Dashboard: http://localhost:9002"
+echo "   - Usage API: http://localhost:9002/api/usage"
+echo "   - Payment History: http://localhost:9002/payment-history"
+echo ""
+echo "📝 Logs de métricas: tail -f /var/log/metrics-generator.log"
 
