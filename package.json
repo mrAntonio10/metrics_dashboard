@@ -8,6 +8,8 @@
     "dev": "next dev -p 9002"
   },
   "dependencies": {
+    "@aws-sdk/client-cost-explorer": "^3.957.0",
+    "@aws-sdk/client-ec2": "^3.957.0",
     "@genkit-ai/google-genai": "^1.20.0",
     "@genkit-ai/next": "^1.20.0",
     "@hookform/resolvers": "^4.1.3",

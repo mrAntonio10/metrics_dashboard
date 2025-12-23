@@ -1,18 +1,12 @@
 // src/app/api/aws/route.ts
 import { NextResponse } from 'next/server';
-import AWS from 'aws-sdk';
+import { EC2Client, DescribeInstancesCommand } from '@aws-sdk/client-ec2';
 
 export const runtime = 'nodejs'; // asegura Node.js, no edge
 
 const region = process.env.AWS_REGION || 'us-east-1';
 const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
 const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-
-AWS.config.update({
-  region,
-  accessKeyId,
-  secretAccessKey,
-});
 
 export async function GET() {
   try {
@@ -27,18 +21,25 @@ export async function GET() {
       );
     }
 
-    const ec2 = new AWS.EC2();
+    const ec2 = new EC2Client({
+      region,
+      credentials: {
+        accessKeyId,
+        secretAccessKey,
+      },
+    });
 
-    const data = await ec2.describeInstances().promise();
+    const command = new DescribeInstancesCommand({});
+    const data = await ec2.send(command);
 
     const instances =
-      (data.Reservations ?? []).flatMap((reservation: AWS.EC2.Reservation) =>
-        (reservation.Instances ?? []).map((instance: AWS.EC2.Instance) => ({
+      (data.Reservations ?? []).flatMap((reservation) =>
+        (reservation.Instances ?? []).map((instance) => ({
           instanceId: instance.InstanceId,
           type: instance.InstanceType,
           state: instance.State?.Name,
           name:
-            instance.Tags?.find((tag: AWS.EC2.Tag) => tag.Key === 'Name')
+            instance.Tags?.find((tag) => tag.Key === 'Name')
               ?.Value ?? null,
           launchTime: instance.LaunchTime,
           az: instance.Placement?.AvailabilityZone ?? null,

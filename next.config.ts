@@ -4,9 +4,7 @@ const nextConfig: NextConfig = {
   output: 'standalone',
 
   // 👇 clave para que mysql2 funcione en Server Components
-  experimental: {
-    serverComponentsExternalPackages: ['mysql2'],
-  },
+  serverExternalPackages: ['mysql2'],
 
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },

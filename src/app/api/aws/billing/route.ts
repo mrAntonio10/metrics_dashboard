@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import AWS from 'aws-sdk';
+import { CostExplorerClient, GetCostAndUsageCommand } from '@aws-sdk/client-cost-explorer';
 
 export const runtime = 'nodejs';
 
@@ -11,13 +11,6 @@ if (!accessKeyId || !secretAccessKey) {
     '[AWS][Billing] Missing AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY in env',
   );
 }
-
-// Cost Explorer es global pero se usa vía us-east-1
-AWS.config.update({
-  region: process.env.AWS_REGION || 'us-east-1',
-  accessKeyId,
-  secretAccessKey,
-});
 
 type BillingServiceCost = {
   service: string;
@@ -97,7 +90,13 @@ export async function GET(req: Request) {
       );
     }
 
-    const ce = new AWS.CostExplorer({ region: 'us-east-1' });
+    const ce = new CostExplorerClient({
+      region: 'us-east-1',
+      credentials: {
+        accessKeyId,
+        secretAccessKey,
+      },
+    });
 
     const url = new URL(req.url);
     const month = url.searchParams.get('month'); // esperado: YYYY-MM
@@ -121,7 +120,7 @@ export async function GET(req: Request) {
       range = getLast30DaysRange();
     }
 
-    const params: AWS.CostExplorer.GetCostAndUsageRequest = {
+    const command = new GetCostAndUsageCommand({
       TimePeriod: {
         Start: range.Start,
         End: range.End,
@@ -134,9 +133,9 @@ export async function GET(req: Request) {
           Key: 'SERVICE',
         },
       ],
-    };
+    });
 
-    const result = await ce.getCostAndUsage(params).promise();
+    const result = await ce.send(command);
 
     const groups = result.ResultsByTime?.[0]?.Groups ?? [];
 
